@@ -52,6 +52,7 @@ authRouter.post('/login', validateRequest(loginSchema), async (req, res) => {
       firstName: user.firstName,
       lastName: user.lastName,
       role: user.role,
+      notificationPreference: user.notificationPreference ?? 'in_app_only',
     },
   });
 });
@@ -75,6 +76,7 @@ authRouter.get('/me', authenticateJwt, async (req: AuthenticatedRequest, res) =>
     firstName: user.firstName,
     lastName: user.lastName,
     role: user.role,
+    notificationPreference: user.notificationPreference ?? 'in_app_only',
   };
 
   if (user.role === 'manager') {

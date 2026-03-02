@@ -6,8 +6,9 @@ import { authenticateJwt, AuthenticatedRequest } from '../middleware/auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { validateRequest } from '../middleware/validate.js';
 import {
+  ClockEventModel,
   LocationModel,
-  NotificationModel,
+  StaffCertificationModel,
   ShiftAssignmentModel,
   ShiftModel,
   UserModel,
@@ -20,6 +21,12 @@ import {
   releaseReservationLock,
   ResourceLockedError,
 } from '../services/lock.service.js';
+import {
+  createAndDispatchNotifications,
+  emitNotificationCreated,
+  simulateEmailForNotifications,
+} from '../services/notification.service.js';
+import { getOnDutyStateForLocation } from '../services/on-duty.service.js';
 import { cancelPendingSwapRequestsForShift } from '../services/swap.service.js';
 import { computeWeekStart, hoursUntilUtc, resolveShiftUtcWindow, utcToLocationString } from '../utils/time.js';
 
@@ -89,6 +96,14 @@ const deleteAssignmentSchema = z.object({
   }),
 });
 
+const clockActionSchema = z.object({
+  query: z.object({}).optional().default({}),
+  params: z.object({ id: z.string().min(1) }),
+  body: z.object({
+    staffId: z.string().optional(),
+  }),
+});
+
 const withinCutoff = (shiftStartAtUtc: string): boolean => {
   const hours = hoursUntilUtc(shiftStartAtUtc);
   return hours <= env.CUTOFF_HOURS;
@@ -110,6 +125,36 @@ const parseObjectId = (value: unknown): Types.ObjectId | null => {
     return null;
   }
   return new Types.ObjectId(singleValue);
+};
+
+const resolveClockTargetStaffId = (
+  req: AuthenticatedRequest,
+  bodyStaffId: unknown,
+): { ok: true; staffId: Types.ObjectId } | { ok: false; status: number; message: string } => {
+  const user = req.user;
+  if (!user) {
+    return { ok: false, status: 401, message: 'Unauthorized' };
+  }
+
+  if (user.role === 'staff') {
+    const requestedStaffId = getSingleValue(bodyStaffId);
+    if (requestedStaffId && requestedStaffId !== user.userId) {
+      return { ok: false, status: 403, message: 'Staff cannot clock events for other users' };
+    }
+
+    if (!Types.ObjectId.isValid(user.userId)) {
+      return { ok: false, status: 401, message: 'Invalid user token' };
+    }
+
+    return { ok: true, staffId: new Types.ObjectId(user.userId) };
+  }
+
+  const staffIdRaw = getSingleValue(bodyStaffId);
+  if (!staffIdRaw || !Types.ObjectId.isValid(staffIdRaw)) {
+    return { ok: false, status: 400, message: 'staffId is required for manager/admin clock actions' };
+  }
+
+  return { ok: true, staffId: new Types.ObjectId(staffIdRaw) };
 };
 
 type ConflictEventPayload = {
@@ -157,6 +202,72 @@ const emitConflictDetected = (
     ...payload,
     detectedAtUtc: new Date().toISOString(),
   } satisfies ConflictEventPayload);
+};
+
+type ScheduleEventName = 'schedule_published' | 'schedule_updated';
+
+type ScheduleEventPayload = {
+  locationId: string;
+  weekStartLocal: string;
+  sourceShiftId?: string;
+  reason?: string;
+  occurredAtUtc: string;
+};
+
+const loadAffectedStaffIdsForSchedule = async (args: {
+  locationId: Types.ObjectId;
+  weekStartLocal: string;
+}): Promise<string[]> => {
+  const [certifiedStaff, shifts] = await Promise.all([
+    StaffCertificationModel.find({ locationId: args.locationId }).select('staffId').lean(),
+    ShiftModel.find({
+      locationId: args.locationId,
+      weekStartLocal: args.weekStartLocal,
+    })
+      .select('_id')
+      .lean(),
+  ]);
+
+  const shiftIds = shifts.map((shift) => shift._id);
+  const assignedStaff =
+    shiftIds.length > 0
+      ? await ShiftAssignmentModel.find({ shiftId: { $in: shiftIds } }).select('staffId').lean()
+      : [];
+
+  return Array.from(
+    new Set(
+      [...certifiedStaff, ...assignedStaff].map((entry) =>
+        entry.staffId instanceof Types.ObjectId ? entry.staffId.toString() : String(entry.staffId),
+      ),
+    ),
+  );
+};
+
+const emitScheduleEvent = async (
+  req: AuthenticatedRequest,
+  eventName: ScheduleEventName,
+  payload: Omit<ScheduleEventPayload, 'occurredAtUtc'>,
+): Promise<void> => {
+  const io = req.app.get('io');
+  if (!io) {
+    return;
+  }
+
+  const fullPayload: ScheduleEventPayload = {
+    ...payload,
+    occurredAtUtc: new Date().toISOString(),
+  };
+
+  io.to(`location:${payload.locationId}`).emit(eventName, fullPayload);
+
+  const staffIds = await loadAffectedStaffIdsForSchedule({
+    locationId: new Types.ObjectId(payload.locationId),
+    weekStartLocal: payload.weekStartLocal,
+  });
+
+  for (const staffId of staffIds) {
+    io.to(`user:${staffId}`).emit(eventName, fullPayload);
+  }
 };
 
 export const shiftsRouter = Router();
@@ -339,6 +450,17 @@ shiftsRouter.post(
       updatedBy: new Types.ObjectId(user.userId),
     });
 
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`location:${locationObjectId.toString()}`).emit('shift_created', {
+        shiftId: created._id.toString(),
+        locationId: locationObjectId.toString(),
+        weekStartLocal: created.weekStartLocal,
+        title: created.title,
+        occurredAtUtc: new Date().toISOString(),
+      });
+    }
+
     res.status(201).json({ shift: created });
   },
 );
@@ -419,6 +541,26 @@ shiftsRouter.patch(
       },
       { new: true },
     ).lean();
+
+    if (updated) {
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`location:${updated.locationId.toString()}`).emit('shift_updated', {
+          shiftId: updated._id.toString(),
+          locationId: updated.locationId.toString(),
+          weekStartLocal: updated.weekStartLocal,
+          title: updated.title,
+          occurredAtUtc: new Date().toISOString(),
+        });
+      }
+
+      await emitScheduleEvent(req, 'schedule_updated', {
+        locationId: updated.locationId.toString(),
+        weekStartLocal: updated.weekStartLocal,
+        sourceShiftId: updated._id.toString(),
+        reason: 'shift_modified',
+      });
+    }
 
     res.json({ shift: updated, cancelledSwapRequests });
   },
@@ -514,6 +656,13 @@ shiftsRouter.post(
       },
     );
 
+    await emitScheduleEvent(req, 'schedule_published', {
+      locationId: sourceShift.locationId.toString(),
+      weekStartLocal: sourceShift.weekStartLocal,
+      sourceShiftId: sourceShift._id.toString(),
+      reason: 'week_published',
+    });
+
     res.json({
       message: 'Published shifts for location week',
       weekStartLocal: sourceShift.weekStartLocal,
@@ -565,6 +714,24 @@ shiftsRouter.post(
     shift.updatedBy = new Types.ObjectId(user.userId);
     await shift.save();
 
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`location:${shift.locationId.toString()}`).emit('shift_updated', {
+        shiftId: shift._id.toString(),
+        locationId: shift.locationId.toString(),
+        weekStartLocal: shift.weekStartLocal,
+        title: shift.title,
+        occurredAtUtc: new Date().toISOString(),
+      });
+    }
+
+    await emitScheduleEvent(req, 'schedule_updated', {
+      locationId: shift.locationId.toString(),
+      weekStartLocal: shift.weekStartLocal,
+      sourceShiftId: shift._id.toString(),
+      reason: 'shift_unpublished',
+    });
+
     res.json({ shift });
   },
 );
@@ -615,6 +782,7 @@ shiftsRouter.post(
           };
         }
       | null = null;
+    let persistedNotifications: Awaited<ReturnType<typeof createAndDispatchNotifications>> = [];
 
     try {
       lockAcquired = await acquireReservationLock({
@@ -704,14 +872,13 @@ shiftsRouter.post(
 
         const assignment = createdAssignments[0];
 
-        await NotificationModel.insertMany(
-          [
+        persistedNotifications = await createAndDispatchNotifications({
+          notifications: [
             {
               userId: staffObjectId,
               type: 'assignment',
               title: 'New shift assignment',
               body: `You were assigned to ${shift.title} on ${shift.localDate} (${shift.startLocalTime}-${shift.endLocalTime}).`,
-              read: false,
               metadata: { shiftId: shift._id.toString() },
             },
             {
@@ -719,15 +886,15 @@ shiftsRouter.post(
               type: 'assignment_action',
               title: 'Assignment recorded',
               body: `You assigned ${staffUser.firstName} ${staffUser.lastName} to ${shift.title}.`,
-              read: false,
               metadata: {
                 shiftId: shift._id.toString(),
                 staffId: staffObjectId.toString(),
               },
             },
           ],
-          { session },
-        );
+          session,
+          simulateEmailAsync: false,
+        });
 
         persistedAssignment = {
           shift: {
@@ -763,15 +930,7 @@ shiftsRouter.post(
 
       const io = req.app.get('io');
       if (io) {
-        io.to(`user:${staffObjectId.toString()}`).emit('notification:new', {
-          type: 'assignment',
-          shiftId: persistedAssignment.shift._id.toString(),
-        });
-
-        io.to(`user:${user.userId}`).emit('notification:new', {
-          type: 'assignment_action',
-          shiftId: persistedAssignment.shift._id.toString(),
-        });
+        emitNotificationCreated({ io, notifications: persistedNotifications });
 
         io.to(`location:${persistedAssignment.shift.locationId.toString()}`).emit('assignment_created', {
           assignmentId: persistedAssignment.assignment._id.toString(),
@@ -782,7 +941,19 @@ shiftsRouter.post(
           assignedBy: user.userId,
           createdAtUtc: new Date().toISOString(),
         });
+
+        io.to(`user:${staffObjectId.toString()}`).emit('assignment_created', {
+          assignmentId: persistedAssignment.assignment._id.toString(),
+          shiftId: persistedAssignment.shift._id.toString(),
+          staffId: staffObjectId.toString(),
+          staffName: `${persistedAssignment.staff.firstName} ${persistedAssignment.staff.lastName}`,
+          locationId: persistedAssignment.shift.locationId.toString(),
+          assignedBy: user.userId,
+          createdAtUtc: new Date().toISOString(),
+        });
       }
+
+      void simulateEmailForNotifications(persistedNotifications);
 
       res.status(201).json({
         assignment: persistedAssignment.assignment,
@@ -887,6 +1058,223 @@ shiftsRouter.delete(
       return;
     }
 
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`location:${shift.locationId.toString()}`).emit('assignment_removed', {
+        assignmentId: assignmentObjectId.toString(),
+        shiftId: shiftObjectId.toString(),
+        staffId: assignment.staffId.toString(),
+        locationId: shift.locationId.toString(),
+        removedBy: user.userId,
+        occurredAtUtc: new Date().toISOString(),
+      });
+
+      io.to(`user:${assignment.staffId.toString()}`).emit('assignment_removed', {
+        assignmentId: assignmentObjectId.toString(),
+        shiftId: shiftObjectId.toString(),
+        staffId: assignment.staffId.toString(),
+        locationId: shift.locationId.toString(),
+        removedBy: user.userId,
+        occurredAtUtc: new Date().toISOString(),
+      });
+    }
+
     res.json({ message: 'Assignment removed' });
+  },
+);
+
+shiftsRouter.post(
+  '/:id/clock-in',
+  authenticateJwt,
+  requireRoles('admin', 'manager', 'staff'),
+  validateRequest(clockActionSchema),
+  async (req: AuthenticatedRequest, res) => {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
+    }
+
+    const shiftObjectId = parseObjectId(req.params.id);
+    if (!shiftObjectId) {
+      res.status(400).json({ message: 'Invalid shift id' });
+      return;
+    }
+
+    const target = resolveClockTargetStaffId(req, req.body.staffId);
+    if (!target.ok) {
+      res.status(target.status).json({ message: target.message });
+      return;
+    }
+
+    const shift = await ShiftModel.findById(shiftObjectId).lean();
+    if (!shift) {
+      res.status(404).json({ message: 'Shift not found' });
+      return;
+    }
+
+    if (user.role === 'manager') {
+      const allowed = await canManageLocation(user, shift.locationId.toString());
+      if (!allowed) {
+        res.status(403).json({ message: 'Cannot clock staff for this location' });
+        return;
+      }
+    }
+
+    const [staffUser, assignment] = await Promise.all([
+      UserModel.findOne({ _id: target.staffId, role: 'staff', active: true })
+        .select('_id firstName lastName')
+        .lean(),
+      ShiftAssignmentModel.findOne({
+        shiftId: shiftObjectId,
+        staffId: target.staffId,
+        status: 'assigned',
+      })
+        .select('_id')
+        .lean(),
+    ]);
+
+    if (!staffUser) {
+      res.status(404).json({ message: 'Staff user not found' });
+      return;
+    }
+
+    if (!assignment) {
+      res.status(409).json({ message: 'Staff must be assigned to this shift before clocking in' });
+      return;
+    }
+
+    const lastEvent = await ClockEventModel.findOne({
+      shiftId: shiftObjectId,
+      staffId: target.staffId,
+    })
+      .sort({ atUtc: -1, createdAt: -1 })
+      .lean();
+
+    if (lastEvent?.eventType === 'clock_in') {
+      res.status(409).json({ message: 'Staff is already clocked in for this shift' });
+      return;
+    }
+
+    const event = await ClockEventModel.create({
+      shiftId: shiftObjectId,
+      staffId: target.staffId,
+      locationId: shift.locationId,
+      eventType: 'clock_in',
+      atUtc: new Date().toISOString(),
+    });
+
+    const onDuty = await getOnDutyStateForLocation(shift.locationId.toString());
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`location:${shift.locationId.toString()}`).emit('on_duty_updated', {
+        locationId: shift.locationId.toString(),
+        shiftId: shiftObjectId.toString(),
+        staffId: target.staffId.toString(),
+        eventType: 'clock_in',
+        onDuty,
+        occurredAtUtc: new Date().toISOString(),
+      });
+    }
+
+    res.status(201).json({ event, onDutyCount: onDuty.length, onDuty });
+  },
+);
+
+shiftsRouter.post(
+  '/:id/clock-out',
+  authenticateJwt,
+  requireRoles('admin', 'manager', 'staff'),
+  validateRequest(clockActionSchema),
+  async (req: AuthenticatedRequest, res) => {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
+    }
+
+    const shiftObjectId = parseObjectId(req.params.id);
+    if (!shiftObjectId) {
+      res.status(400).json({ message: 'Invalid shift id' });
+      return;
+    }
+
+    const target = resolveClockTargetStaffId(req, req.body.staffId);
+    if (!target.ok) {
+      res.status(target.status).json({ message: target.message });
+      return;
+    }
+
+    const shift = await ShiftModel.findById(shiftObjectId).lean();
+    if (!shift) {
+      res.status(404).json({ message: 'Shift not found' });
+      return;
+    }
+
+    if (user.role === 'manager') {
+      const allowed = await canManageLocation(user, shift.locationId.toString());
+      if (!allowed) {
+        res.status(403).json({ message: 'Cannot clock staff for this location' });
+        return;
+      }
+    }
+
+    const [staffUser, assignment] = await Promise.all([
+      UserModel.findOne({ _id: target.staffId, role: 'staff', active: true })
+        .select('_id firstName lastName')
+        .lean(),
+      ShiftAssignmentModel.findOne({
+        shiftId: shiftObjectId,
+        staffId: target.staffId,
+        status: 'assigned',
+      })
+        .select('_id')
+        .lean(),
+    ]);
+
+    if (!staffUser) {
+      res.status(404).json({ message: 'Staff user not found' });
+      return;
+    }
+
+    if (!assignment) {
+      res.status(409).json({ message: 'Staff must be assigned to this shift before clocking out' });
+      return;
+    }
+
+    const lastEvent = await ClockEventModel.findOne({
+      shiftId: shiftObjectId,
+      staffId: target.staffId,
+    })
+      .sort({ atUtc: -1, createdAt: -1 })
+      .lean();
+
+    if (!lastEvent || lastEvent.eventType !== 'clock_in') {
+      res.status(409).json({ message: 'Staff is not currently clocked in for this shift' });
+      return;
+    }
+
+    const event = await ClockEventModel.create({
+      shiftId: shiftObjectId,
+      staffId: target.staffId,
+      locationId: shift.locationId,
+      eventType: 'clock_out',
+      atUtc: new Date().toISOString(),
+    });
+
+    const onDuty = await getOnDutyStateForLocation(shift.locationId.toString());
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`location:${shift.locationId.toString()}`).emit('on_duty_updated', {
+        locationId: shift.locationId.toString(),
+        shiftId: shiftObjectId.toString(),
+        staffId: target.staffId.toString(),
+        eventType: 'clock_out',
+        onDuty,
+        occurredAtUtc: new Date().toISOString(),
+      });
+    }
+
+    res.status(201).json({ event, onDutyCount: onDuty.length, onDuty });
   },
 );

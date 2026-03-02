@@ -6,14 +6,19 @@ import {
   AuthLoginResponse,
   CreateShiftRequest,
   CurrentUser,
+  ClockActionResponse,
   ListNotificationsResponse,
+  MarkNotificationsReadResponse,
+  NotificationPreference,
   ListShiftsResponse,
   ListStaffResponse,
   LocationSummary,
   MeResponse,
   NotificationResponse,
+  OnDutyResponse,
   PublishShiftResponse,
   ShiftMutationResponse,
+  UpdateNotificationPreferenceResponse,
   UpdateShiftRequest,
 } from './types';
 
@@ -116,12 +121,61 @@ export const listStaff = async (locationId: string): Promise<ListStaffResponse> 
   return data;
 };
 
-export const listNotifications = async (): Promise<ListNotificationsResponse> => {
-  const { data } = await api.get<ListNotificationsResponse>('/notifications');
+export const listNotifications = async (
+  page = 1,
+  pageSize = 20,
+): Promise<ListNotificationsResponse> => {
+  const { data } = await api.get<ListNotificationsResponse>('/notifications', {
+    params: { page, pageSize },
+  });
   return data;
 };
 
 export const markNotificationRead = async (id: string): Promise<NotificationResponse> => {
   const { data } = await api.patch<NotificationResponse>(`/notifications/${id}/read`, {});
+  return data;
+};
+
+export const markNotificationsRead = async (
+  notificationIds: string[],
+): Promise<MarkNotificationsReadResponse> => {
+  const { data } = await api.post<MarkNotificationsReadResponse>('/notifications/mark-read', {
+    notificationIds,
+  });
+  return data;
+};
+
+export const updateNotificationPreference = async (
+  preference: NotificationPreference,
+): Promise<UpdateNotificationPreferenceResponse> => {
+  const { data } = await api.patch<UpdateNotificationPreferenceResponse>(
+    '/users/me/notification-preferences',
+    { preference },
+  );
+  return data;
+};
+
+export const getOnDuty = async (locationId: string): Promise<OnDutyResponse> => {
+  const { data } = await api.get<OnDutyResponse>('/on-duty', { params: { locationId } });
+  return data;
+};
+
+export const clockIn = async (
+  shiftId: string,
+  staffId?: string,
+): Promise<ClockActionResponse> => {
+  const { data } = await api.post<ClockActionResponse>(`/shifts/${shiftId}/clock-in`, {
+    ...(staffId ? { staffId } : {}),
+  });
+  return data;
+};
+
+export const clockOut = async (
+  shiftId: string,
+  staffId?: string,
+): Promise<ClockActionResponse> => {
+  const { data } = await api.post<ClockActionResponse>(`/shifts/${shiftId}/clock-out`, {
+    ...(staffId ? { staffId } : {}),
+  });
   return data;
 };

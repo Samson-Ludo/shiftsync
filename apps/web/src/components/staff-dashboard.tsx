@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DateTime } from 'luxon';
 import { ApiError, CurrentUser, ShiftAssignment, ShiftItem, listShifts } from '@/lib/api';
+import { getToken } from '@/lib/api/auth';
+import { getSocket } from '@/lib/socket';
 import { NotificationCenter } from './notification-center';
 
 const mondayIso = () => DateTime.now().startOf('week').toISODate() ?? DateTime.now().toISODate()!;
@@ -42,6 +44,32 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
 
   useEffect(() => {
     void loadShifts();
+  }, [loadShifts]);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      return;
+    }
+
+    const socket = getSocket(token, process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000');
+    const reload = () => {
+      void loadShifts();
+    };
+
+    socket.on('schedule_published', reload);
+    socket.on('schedule_updated', reload);
+    socket.on('shift_updated', reload);
+    socket.on('assignment_created', reload);
+    socket.on('assignment_removed', reload);
+
+    return () => {
+      socket.off('schedule_published', reload);
+      socket.off('schedule_updated', reload);
+      socket.off('shift_updated', reload);
+      socket.off('assignment_created', reload);
+      socket.off('assignment_removed', reload);
+    };
   }, [loadShifts]);
 
   const myShifts = useMemo(

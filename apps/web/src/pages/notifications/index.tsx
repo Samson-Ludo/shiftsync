@@ -29,7 +29,7 @@ export default function NotificationsPage() {
         </Link>
       </header>
 
-      <NotificationCenter />
+      <NotificationCenter mode="full" initialPreference={user.notificationPreference} />
     </main>
   );
 }

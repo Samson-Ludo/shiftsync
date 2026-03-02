@@ -5,7 +5,7 @@ import { Server } from 'socket.io';
 import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { connectToDatabase } from './db/mongoose.js';
-import { ManagerLocationModel } from './models/index.js';
+import { LocationModel, ManagerLocationModel } from './models/index.js';
 
 const start = async () => {
   await connectToDatabase();
@@ -52,17 +52,30 @@ const start = async () => {
     socket.join(`user:${userId}`);
 
     const joinLocationRooms = async () => {
-      if (role !== 'manager' || !Types.ObjectId.isValid(userId)) {
+      if (!Types.ObjectId.isValid(userId)) {
         return [];
       }
 
-      const managerLocations = await ManagerLocationModel.find({
-        managerId: new Types.ObjectId(userId),
-      })
-        .select('locationId')
-        .lean();
+      if (role !== 'manager' && role !== 'admin') {
+        return [];
+      }
 
-      const joinedRooms = managerLocations.map((row) => `location:${row.locationId.toString()}`);
+      const joinedLocationIds =
+        role === 'admin'
+          ? (
+              await LocationModel.find({})
+                .select('_id')
+                .lean()
+            ).map((row) => row._id.toString())
+          : (
+              await ManagerLocationModel.find({
+                managerId: new Types.ObjectId(userId),
+              })
+                .select('locationId')
+                .lean()
+            ).map((row) => row.locationId.toString());
+
+      const joinedRooms = joinedLocationIds.map((locationId) => `location:${locationId}`);
       for (const room of joinedRooms) {
         socket.join(room);
       }

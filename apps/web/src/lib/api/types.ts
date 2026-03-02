@@ -1,4 +1,5 @@
 export type UserRole = 'admin' | 'manager' | 'staff';
+export type NotificationPreference = 'in_app_only' | 'in_app_plus_email_sim';
 
 export type LocationSummary = {
   _id: string;
@@ -18,6 +19,7 @@ export type CurrentUser = {
   firstName: string;
   lastName: string;
   role: UserRole;
+  notificationPreference: NotificationPreference;
   managerLocations?: LocationSummary[];
   certifiedLocations?: CertifiedLocation[];
 };
@@ -138,13 +140,61 @@ export type NotificationItem = {
   title: string;
   body: string;
   read: boolean;
+  metadata?: Record<string, unknown>;
   createdAt: string;
 };
 
 export type ListNotificationsResponse = {
   notifications: NotificationItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
 };
 
 export type NotificationResponse = {
   notification: NotificationItem;
+};
+
+export type MarkNotificationsReadResponse = {
+  message: string;
+  modifiedCount: number;
+};
+
+export type UpdateNotificationPreferenceResponse = {
+  preference: NotificationPreference;
+  message: string;
+};
+
+export type OnDutyEntry = {
+  staffId: string;
+  staffName: string;
+  staffEmail: string;
+  shiftId: string;
+  shiftTitle: string;
+  clockedInAtUtc: string;
+  locationId: string;
+  timezone: string;
+  localDate: string;
+  startLocalTime: string;
+  endLocalTime: string;
+};
+
+export type OnDutyResponse = {
+  locationId: string;
+  generatedAtUtc: string;
+  onDuty: OnDutyEntry[];
+};
+
+export type ClockActionResponse = {
+  event: {
+    _id: string;
+    shiftId?: string;
+    staffId: string;
+    locationId: string;
+    eventType: 'clock_in' | 'clock_out';
+    atUtc: string;
+  };
+  onDutyCount: number;
+  onDuty: OnDutyEntry[];
 };

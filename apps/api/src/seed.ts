@@ -234,16 +234,18 @@ const seed = async () => {
     email: 'admin@coastaleats.com',
     passwordHash,
     role: 'admin',
+    notificationPreference: 'in_app_plus_email_sim',
     active: true,
   });
 
   const managers = await UserModel.insertMany(
-    managerSeed.map((manager) => ({
+    managerSeed.map((manager, index) => ({
       firstName: manager.firstName,
       lastName: manager.lastName,
       email: manager.email,
       passwordHash,
       role: 'manager',
+      notificationPreference: index === 0 ? 'in_app_plus_email_sim' : 'in_app_only',
       active: true,
     })),
   );
@@ -258,12 +260,13 @@ const seed = async () => {
   );
 
   const staffUsers = await UserModel.insertMany(
-    staffSeedData.map((staff) => ({
+    staffSeedData.map((staff, index) => ({
       firstName: staff.firstName,
       lastName: staff.lastName,
       email: staff.email,
       passwordHash,
       role: 'staff',
+      notificationPreference: index % 3 === 0 ? 'in_app_plus_email_sim' : 'in_app_only',
       active: true,
     })),
   );

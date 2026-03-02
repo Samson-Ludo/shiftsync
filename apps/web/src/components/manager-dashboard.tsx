@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { DateTime } from 'luxon';
 import {
   ApiError,
@@ -47,6 +48,10 @@ type AssignmentCreatedEvent = {
   locationId: string;
   assignedBy: string;
   createdAtUtc: string;
+};
+
+type LocationEventPayload = {
+  locationId?: string;
 };
 
 const initialCreateForm: CreateFormState = {
@@ -247,12 +252,30 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
       void loadShifts();
     };
 
+    const handleLocationRefreshEvent = (payload: LocationEventPayload) => {
+      if (!payload.locationId || payload.locationId !== locationId) {
+        return;
+      }
+
+      void loadShifts();
+    };
+
     socket.on('conflict_detected', handleConflictDetected);
     socket.on('assignment_created', handleAssignmentCreated);
+    socket.on('assignment_removed', handleLocationRefreshEvent);
+    socket.on('shift_created', handleLocationRefreshEvent);
+    socket.on('shift_updated', handleLocationRefreshEvent);
+    socket.on('schedule_published', handleLocationRefreshEvent);
+    socket.on('schedule_updated', handleLocationRefreshEvent);
 
     return () => {
       socket.off('conflict_detected', handleConflictDetected);
       socket.off('assignment_created', handleAssignmentCreated);
+      socket.off('assignment_removed', handleLocationRefreshEvent);
+      socket.off('shift_created', handleLocationRefreshEvent);
+      socket.off('shift_updated', handleLocationRefreshEvent);
+      socket.off('schedule_published', handleLocationRefreshEvent);
+      socket.off('schedule_updated', handleLocationRefreshEvent);
     };
   }, [locationId, loadShifts]);
 
@@ -315,6 +338,11 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <Link href="/on-duty" className="inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm">
+              View On-Duty Dashboard
+            </Link>
+          </div>
           <label>
             <span className="mb-1 block text-xs text-slate-500">Location</span>
             <select

@@ -102,18 +102,54 @@ All seeded users use password: `Pass123!`
 - `POST /auth/login`
 - `GET /auth/me`
 - `GET /notifications`
+- `POST /notifications/mark-read`
 - `PATCH /notifications/:id/read`
+- `PATCH /users/me/notification-preferences`
 - `POST /shifts`
 - `GET /shifts?locationId&weekStart`
 - `PATCH /shifts/:id`
 - `POST /shifts/:id/publish`
 - `POST /shifts/:id/unpublish`
 - `POST /shifts/:id/assign`
+- `POST /shifts/:id/clock-in`
+- `POST /shifts/:id/clock-out`
 - `POST /shifts/:id/validate-assign/:staffId`
 - `DELETE /shifts/:id/assignments/:assignmentId`
 - `GET /staff?locationId=<id>`
-- `POST /swap-requests` (placeholder, returns 501)
+- `GET /on-duty?locationId=<id>`
+- `POST /swap-requests` (stub + realtime event plumbing)
+- `POST /swap-requests/:id/resolve` (stub + realtime event plumbing)
 - `GET /analytics/schedule-health` (placeholder, returns 501)
+
+## Realtime Features
+
+Socket rooms:
+
+- `user:{userId}`
+- `location:{locationId}` (joined by manager/admin sockets)
+
+Implemented events:
+
+- `schedule_published`
+- `schedule_updated`
+- `shift_created`
+- `shift_updated`
+- `assignment_created`
+- `assignment_removed`
+- `notification_created`
+- `on_duty_updated`
+- `swap_requested` (stub plumbing)
+- `swap_updated` (stub plumbing)
+- `swap_cancelled` (stub plumbing)
+- `conflict_detected`
+
+Behavior highlights:
+
+- Staff schedule views refresh live on `schedule_published` and `schedule_updated`.
+- Manager week view refreshes live on shift/assignment schedule events.
+- Notifications are persisted and pushed live via `notification_created`.
+- On-duty view updates live per location via `on_duty_updated`.
+- Concurrent assignment conflicts emit `conflict_detected` to manager user room.
 
 ## Frontend Architecture Rules
 
@@ -162,9 +198,14 @@ Conflict handling:
 6. Confirm suggestions appear for failing validations and click one to preselect.
 7. Confirm assign only works when validation is `ok: true`.
 8. Use staff login and confirm dashboard only shows published schedule + own assignments.
-9. Check notifications panel and mark an unread notification as read.
-10. Call `POST /shifts/:id/unpublish` or `PATCH /shifts/:id` for a near-term shift and confirm 48h cutoff blocks it.
-11. Concurrency test (two manager windows):
+9. Open `/notifications` and:
+   - verify paginated notifications list
+   - mark one as read
+   - switch preference between `in_app_only` and `in_app_plus_email_sim`
+   - trigger assignment and confirm new notification appears via realtime
+10. Open `/on-duty` (manager/admin), choose a location, then call `POST /shifts/:id/clock-in` and `POST /shifts/:id/clock-out` for assigned staff; confirm the list updates live without refresh.
+11. Call `POST /shifts/:id/unpublish` or `PATCH /shifts/:id` for a near-term shift and confirm 48h cutoff blocks it.
+12. Concurrency test (two manager windows):
    - Open two browser windows and log in as managers who can access the same location.
    - Pick two different shifts and the same staff member.
    - Click **Confirm Assign** in both windows at nearly the same time.
