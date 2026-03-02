@@ -35,6 +35,7 @@ type StaffSeed = {
 type ShiftInsert = {
   locationId: Types.ObjectId;
   title: string;
+  requiredSkill?: string;
   timezone: string;
   localDate: string;
   startLocalTime: string;
@@ -334,14 +335,14 @@ const seed = async () => {
       staffId: staffUsers[0]._id,
       dateLocal: nyDates[2],
       timezone: 'America/New_York',
-      type: 'unavailable',
+      type: 'block',
       reason: 'Medical appointment',
     },
     {
       staffId: staffUsers[1]._id,
       dateLocal: laDates[3],
       timezone: 'America/Los_Angeles',
-      type: 'available',
+      type: 'allow',
       startLocalTime: '18:00',
       endLocalTime: '22:00',
       reason: 'Can take extra evening shift',
@@ -350,7 +351,7 @@ const seed = async () => {
       staffId: staffUsers[6]._id,
       dateLocal: nyDates[4],
       timezone: 'America/New_York',
-      type: 'unavailable',
+      type: 'block',
       startLocalTime: '09:00',
       endLocalTime: '18:00',
       reason: 'Family event',
@@ -359,7 +360,7 @@ const seed = async () => {
       staffId: staffUsers[9]._id,
       dateLocal: laDates[1],
       timezone: 'America/Los_Angeles',
-      type: 'unavailable',
+      type: 'block',
       reason: 'Training day',
     },
   ]);
@@ -369,6 +370,7 @@ const seed = async () => {
   const addShift = (args: {
     locationCode: string;
     title: string;
+    requiredSkill?: string;
     localDate: string;
     startLocalTime: string;
     endLocalTime: string;
@@ -385,6 +387,7 @@ const seed = async () => {
     shiftRows.push({
       locationId: location._id,
       title: args.title,
+      requiredSkill: args.requiredSkill,
       timezone: location.timezone,
       localDate: args.localDate,
       startLocalTime: args.startLocalTime,
@@ -403,6 +406,7 @@ const seed = async () => {
     addShift({
       locationCode: 'LA_PIER',
       title: 'Lunch Service',
+      requiredSkill: 'line_cook',
       localDate: laDates[i],
       startLocalTime: '11:00',
       endLocalTime: '15:00',
@@ -411,6 +415,7 @@ const seed = async () => {
     addShift({
       locationCode: 'LA_DT',
       title: 'Dinner Service',
+      requiredSkill: 'server',
       localDate: laDates[i],
       startLocalTime: '17:00',
       endLocalTime: '21:00',
@@ -419,6 +424,7 @@ const seed = async () => {
     addShift({
       locationCode: 'NYC_MID',
       title: 'Brunch Rush',
+      requiredSkill: 'barista',
       localDate: nyDates[i],
       startLocalTime: '10:00',
       endLocalTime: '14:00',
@@ -427,6 +433,7 @@ const seed = async () => {
     addShift({
       locationCode: 'NYC_BRK',
       title: 'Evening Close',
+      requiredSkill: 'closing',
       localDate: nyDates[i],
       startLocalTime: '19:00',
       endLocalTime: '23:00',
@@ -437,6 +444,7 @@ const seed = async () => {
   addShift({
     locationCode: 'NYC_BRK',
     title: 'Overnight Cleanup',
+    requiredSkill: 'closing',
     localDate: nyDates[5],
     startLocalTime: '23:00',
     endLocalTime: '03:00',
@@ -446,6 +454,7 @@ const seed = async () => {
   addShift({
     locationCode: 'LA_PIER',
     title: 'Conflict Candidate A',
+    requiredSkill: 'line_cook',
     localDate: laDates[2],
     startLocalTime: '12:00',
     endLocalTime: '16:00',
@@ -455,9 +464,40 @@ const seed = async () => {
   addShift({
     locationCode: 'LA_DT',
     title: 'Conflict Candidate B',
+    requiredSkill: 'line_cook',
     localDate: laDates[2],
     startLocalTime: '13:00',
     endLocalTime: '17:00',
+    published: true,
+  });
+
+  addShift({
+    locationCode: 'NYC_MID',
+    title: 'Unavailable Test Shift',
+    requiredSkill: 'line_cook',
+    localDate: nyDates[2],
+    startLocalTime: '12:00',
+    endLocalTime: '16:00',
+    published: true,
+  });
+
+  addShift({
+    locationCode: 'NYC_BRK',
+    title: 'Rest Gap Test Shift',
+    requiredSkill: 'server',
+    localDate: nyDates[6],
+    startLocalTime: '09:00',
+    endLocalTime: '13:00',
+    published: true,
+  });
+
+  addShift({
+    locationCode: 'LA_DT',
+    title: 'Uncertified Test Shift',
+    requiredSkill: 'prep',
+    localDate: laDates[3],
+    startLocalTime: '11:00',
+    endLocalTime: '15:00',
     published: true,
   });
 
@@ -481,6 +521,7 @@ const seed = async () => {
     addShift({
       locationCode: 'NYC_MID',
       title: `High-Hours Prep Block ${index + 1}`,
+      requiredSkill: 'prep',
       localDate: nyDates[spec.day],
       startLocalTime: spec.start,
       endLocalTime: spec.end,
@@ -510,6 +551,12 @@ const seed = async () => {
     {
       shiftId: shifts.find((shift) => shift.title === 'Lunch Service')!._id,
       staffId: staffUsers[9]._id,
+      assignedBy: managers[0]._id,
+      status: 'assigned' as const,
+    },
+    {
+      shiftId: shifts.find((shift) => shift.title === 'Conflict Candidate A')!._id,
+      staffId: staffUsers[7]._id,
       assignedBy: managers[0]._id,
       status: 'assigned' as const,
     },
@@ -594,6 +641,7 @@ const seed = async () => {
   console.log('- overnight shift seeded: Overnight Cleanup 23:00-03:00');
   console.log('- 12x4h assignments + 1 extra 4h shift create a 52h risk scenario');
   console.log('- overlapping conflict candidate shifts exist in LA for double-booking checks');
+  console.log('- explicit validation demo shifts seeded for unavailable, skill, certification, overlap, and rest constraints');
 
   await disconnectFromDatabase();
 };

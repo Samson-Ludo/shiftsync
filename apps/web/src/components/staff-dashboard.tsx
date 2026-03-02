@@ -1,8 +1,6 @@
-'use client';
-
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DateTime } from 'luxon';
-import { CurrentUser, ShiftAssignment, ShiftItem } from '@/lib/types';
+import { ApiError, CurrentUser, ShiftAssignment, ShiftItem, listShifts } from '@/lib/api';
 import { NotificationCenter } from './notification-center';
 
 const mondayIso = () => DateTime.now().startOf('week').toISODate() ?? DateTime.now().toISODate()!;
@@ -14,6 +12,14 @@ const assignmentMatchesUser = (assignment: ShiftAssignment, userId: string): boo
   return assignment.staffId._id === userId;
 };
 
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof ApiError && error.message) {
+    return error.message;
+  }
+
+  return fallback;
+};
+
 export function StaffDashboard({ user }: { user: CurrentUser }) {
   const [weekStart, setWeekStart] = useState(mondayIso());
   const [shifts, setShifts] = useState<ShiftItem[]>([]);
@@ -23,19 +29,15 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
   const loadShifts = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const query = new URLSearchParams({ weekStart }).toString();
-    const response = await fetch(`/api/shifts?${query}`, { cache: 'no-store' });
 
-    if (!response.ok) {
-      const payload = (await response.json()) as { message?: string };
-      setError(payload.message ?? 'Failed to load shifts');
+    try {
+      const payload = await listShifts(undefined, weekStart);
+      setShifts(payload.shifts ?? []);
+    } catch (loadError) {
+      setError(getErrorMessage(loadError, 'Failed to load shifts'));
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const payload = (await response.json()) as { shifts: ShiftItem[] };
-    setShifts(payload.shifts ?? []);
-    setLoading(false);
   }, [weekStart]);
 
   useEffect(() => {
@@ -43,7 +45,10 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
   }, [loadShifts]);
 
   const myShifts = useMemo(
-    () => shifts.filter((shift) => shift.assignments?.some((assignment) => assignmentMatchesUser(assignment, user.id))),
+    () =>
+      shifts.filter((shift) =>
+        shift.assignments?.some((assignment) => assignmentMatchesUser(assignment, user.id)),
+      ),
     [shifts, user.id],
   );
 
@@ -65,7 +70,7 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
       <header className="panel flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Staff Dashboard</p>
-          <h1 className="font-[var(--font-heading)] text-2xl font-semibold">
+          <h1 className="font-[family-name:var(--font-heading)] text-2xl font-semibold">
             Welcome, {user.firstName} {user.lastName}
           </h1>
         </div>
@@ -83,7 +88,7 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
       <section className="grid gap-4 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-4">
           <article className="panel p-5">
-            <h2 className="font-[var(--font-heading)] text-lg font-semibold">My Shifts</h2>
+            <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">My Shifts</h2>
             {loading ? <p className="mt-3 text-sm text-slate-500">Loading shifts...</p> : null}
             {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
             <ul className="mt-3 space-y-3">
@@ -104,7 +109,7 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
           </article>
 
           <article className="panel p-5">
-            <h2 className="font-[var(--font-heading)] text-lg font-semibold">Published Schedule</h2>
+            <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">Published Schedule</h2>
             <div className="mt-3 space-y-4">
               {publishedByLocation.map(([locationName, locationShifts]) => (
                 <div key={locationName}>

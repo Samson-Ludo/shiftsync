@@ -1,8 +1,9 @@
-'use client';
-
-import { useEffect, useMemo, useState } from 'react';
-import { NotificationItem } from '@/lib/types';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { NotificationItem, listNotifications, markNotificationRead } from '@/lib/api';
+import { getToken } from '@/lib/api/auth';
 import { getSocket } from '@/lib/socket';
+
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
 export function NotificationCenter() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -13,41 +14,37 @@ export function NotificationCenter() {
     [notifications],
   );
 
-  const fetchNotifications = async () => {
-    const response = await fetch('/api/notifications', { cache: 'no-store' });
-    if (!response.ok) {
-      return;
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const payload = await listNotifications();
+      setNotifications(payload.notifications ?? []);
+    } catch {
+      // Notification panel should fail silently for dashboard continuity.
     }
-
-    const payload = (await response.json()) as { notifications: NotificationItem[] };
-    setNotifications(payload.notifications ?? []);
-  };
+  }, []);
 
   const markRead = async (notificationId: string) => {
-    const response = await fetch(`/api/notifications/${notificationId}/read`, {
-      method: 'PATCH',
-    });
-
-    if (!response.ok) {
-      return;
+    try {
+      await markNotificationRead(notificationId);
+      setNotifications((current) =>
+        current.map((item) =>
+          item._id === notificationId
+            ? {
+                ...item,
+                read: true,
+              }
+            : item,
+        ),
+      );
+    } catch {
+      // Keep current state if mark-read fails.
     }
-
-    setNotifications((current) =>
-      current.map((item) =>
-        item._id === notificationId
-          ? {
-              ...item,
-              read: true,
-            }
-          : item,
-      ),
-    );
   };
 
   useEffect(() => {
     void fetchNotifications();
 
-    const socket = getSocket(null, process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000');
+    const socket = getSocket(getToken(), apiBaseUrl);
     socket.on('socket:ready', () => setSocketReady(true));
     socket.on('notification:new', () => {
       void fetchNotifications();
@@ -57,12 +54,12 @@ export function NotificationCenter() {
       socket.off('socket:ready');
       socket.off('notification:new');
     };
-  }, []);
+  }, [fetchNotifications]);
 
   return (
     <section className="panel p-5">
       <div className="flex items-center justify-between">
-        <h2 className="font-[var(--font-heading)] text-lg font-semibold">Notifications</h2>
+        <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">Notifications</h2>
         <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">
           {unreadCount} unread
         </span>

@@ -12,10 +12,8 @@ import {
   ShiftModel,
   UserModel,
 } from '../models/index.js';
-import {
-  canManageLocation,
-  getStaffCertifiedLocationIds,
-} from '../services/access.service.js';
+import { canManageLocation, getStaffCertifiedLocationIds } from '../services/access.service.js';
+import { validateAssignment } from '../services/assignmentValidator.js';
 import { cancelPendingSwapRequestsForShift } from '../services/swap.service.js';
 import { computeWeekStart, hoursUntilUtc, resolveShiftUtcWindow, utcToLocationString } from '../utils/time.js';
 
@@ -34,6 +32,7 @@ const createShiftSchema = z.object({
   body: z.object({
     locationId: z.string().min(1),
     title: z.string().min(1),
+    requiredSkill: z.string().optional(),
     localDate: z.string().min(1),
     startLocalTime: z.string().min(1),
     endLocalTime: z.string().min(1),
@@ -47,6 +46,7 @@ const patchShiftSchema = z.object({
   }),
   body: z.object({
     title: z.string().min(1).optional(),
+    requiredSkill: z.string().optional(),
     localDate: z.string().min(1).optional(),
     startLocalTime: z.string().min(1).optional(),
     endLocalTime: z.string().min(1).optional(),
@@ -63,6 +63,15 @@ const assignShiftSchema = z.object({
   query: z.object({}).optional().default({}),
   params: z.object({ id: z.string().min(1) }),
   body: z.object({ staffId: z.string().min(1) }),
+});
+
+const validateAssignSchema = z.object({
+  query: z.object({}).optional().default({}),
+  body: z.object({}).optional().default({}),
+  params: z.object({
+    id: z.string().min(1),
+    staffId: z.string().min(1),
+  }),
 });
 
 const deleteAssignmentSchema = z.object({
@@ -144,7 +153,7 @@ shiftsRouter.get(
       const ownAssignments = await ShiftAssignmentModel.find({ staffId: new Types.ObjectId(user.userId) })
         .select('shiftId')
         .lean();
-      const assignedShiftIds = ownAssignments.map((a) => a.shiftId);
+      const assignedShiftIds = ownAssignments.map((assignment) => assignment.shiftId);
 
       const staffFilter: Record<string, unknown> = {
         ...filters,
@@ -229,7 +238,7 @@ shiftsRouter.post(
       return;
     }
 
-    const { locationId, title, localDate, startLocalTime, endLocalTime } = req.body;
+    const { locationId, title, requiredSkill, localDate, startLocalTime, endLocalTime } = req.body;
     const locationObjectId = parseObjectId(locationId);
 
     if (!locationObjectId) {
@@ -263,6 +272,7 @@ shiftsRouter.post(
     const created = await ShiftModel.create({
       locationId: locationObjectId,
       title,
+      requiredSkill: requiredSkill?.trim() || undefined,
       timezone: location.timezone,
       localDate,
       startLocalTime,
@@ -332,7 +342,7 @@ shiftsRouter.patch(
 
     const weekStartLocal = computeWeekStart(nextLocalDate, shift.timezone);
 
-    const hadPendingSwapRequests = await cancelPendingSwapRequestsForShift(
+    const cancelledSwapRequests = await cancelPendingSwapRequestsForShift(
       shift._id.toString(),
       'Cancelled because shift details changed',
     );
@@ -343,6 +353,7 @@ shiftsRouter.patch(
       {
         $set: {
           title: req.body.title ?? shift.title,
+          requiredSkill: req.body.requiredSkill ?? shift.requiredSkill,
           localDate: nextLocalDate,
           startLocalTime: nextStart,
           endLocalTime: nextEnd,
@@ -356,7 +367,51 @@ shiftsRouter.patch(
       { new: true },
     ).lean();
 
-    res.json({ shift: updated, cancelledSwapRequests: hadPendingSwapRequests });
+    res.json({ shift: updated, cancelledSwapRequests });
+  },
+);
+
+shiftsRouter.post(
+  '/:id/validate-assign/:staffId',
+  authenticateJwt,
+  requireRoles('admin', 'manager'),
+  validateRequest(validateAssignSchema),
+  async (req: AuthenticatedRequest, res) => {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
+    }
+
+    const shiftObjectId = parseObjectId(req.params.id);
+    const staffObjectId = parseObjectId(req.params.staffId);
+
+    if (!shiftObjectId || !staffObjectId) {
+      res.status(400).json({ message: 'Invalid shiftId or staffId' });
+      return;
+    }
+
+    const shift = await ShiftModel.findById(shiftObjectId).lean();
+    if (!shift) {
+      res.status(404).json({ message: 'Shift not found' });
+      return;
+    }
+
+    if (user.role === 'manager') {
+      const allowed = await canManageLocation(user, shift.locationId.toString());
+      if (!allowed) {
+        res.status(403).json({ message: 'Cannot validate assignments for this shift' });
+        return;
+      }
+    }
+
+    const validation = await validateAssignment({
+      shiftId: shiftObjectId.toString(),
+      staffId: staffObjectId.toString(),
+      actorId: user.userId,
+    });
+
+    res.status(validation.ok ? 200 : 409).json(validation);
   },
 );
 
@@ -474,10 +529,11 @@ shiftsRouter.post(
     }
 
     const shiftObjectId = parseObjectId(req.params.id);
-    const staffObjectId = parseObjectId(req.body.staffId);
+    const staffIdRaw = getSingleValue(req.body.staffId);
+    const staffObjectId = parseObjectId(staffIdRaw);
 
     if (!shiftObjectId || !staffObjectId) {
-      res.status(400).json({ message: 'Invalid shift or staff id' });
+      res.status(400).json({ message: 'Invalid shiftId or staffId' });
       return;
     }
 
@@ -495,7 +551,24 @@ shiftsRouter.post(
       }
     }
 
-    const staffUser = await UserModel.findOne({ _id: staffObjectId, role: 'staff', active: true }).lean();
+    const validation = await validateAssignment({
+      shiftId: shiftObjectId.toString(),
+      staffId: staffObjectId.toString(),
+      actorId: user.userId,
+    });
+
+    if (!validation.ok) {
+      res.status(409).json({
+        message: 'Assignment blocked by constraints',
+        ...validation,
+      });
+      return;
+    }
+
+    const staffUser = await UserModel.findOne({ _id: staffObjectId, role: 'staff', active: true })
+      .select('firstName lastName')
+      .lean();
+
     if (!staffUser) {
       res.status(404).json({ message: 'Staff user not found' });
       return;
@@ -509,14 +582,27 @@ shiftsRouter.post(
         status: 'assigned',
       });
 
-      await NotificationModel.create({
-        userId: staffObjectId,
-        type: 'assignment',
-        title: 'New shift assignment',
-        body: `You were assigned to ${shift.title} on ${shift.localDate} (${shift.startLocalTime}-${shift.endLocalTime}).`,
-        read: false,
-        metadata: { shiftId: shift._id.toString() },
-      });
+      await NotificationModel.insertMany([
+        {
+          userId: staffObjectId,
+          type: 'assignment',
+          title: 'New shift assignment',
+          body: `You were assigned to ${shift.title} on ${shift.localDate} (${shift.startLocalTime}-${shift.endLocalTime}).`,
+          read: false,
+          metadata: { shiftId: shift._id.toString() },
+        },
+        {
+          userId: new Types.ObjectId(user.userId),
+          type: 'assignment_action',
+          title: 'Assignment recorded',
+          body: `You assigned ${staffUser.firstName} ${staffUser.lastName} to ${shift.title}.`,
+          read: false,
+          metadata: {
+            shiftId: shift._id.toString(),
+            staffId: staffObjectId.toString(),
+          },
+        },
+      ]);
 
       const io = req.app.get('io');
       if (io) {
@@ -524,14 +610,29 @@ shiftsRouter.post(
           type: 'assignment',
           shiftId: shift._id.toString(),
         });
+
+        io.to(`user:${user.userId}`).emit('notification:new', {
+          type: 'assignment_action',
+          shiftId: shift._id.toString(),
+        });
       }
 
-      // TODO: Enforce availability, overtime, and double-booking constraints in a future iteration.
-      res.status(201).json({ assignment });
+      res.status(201).json({ assignment, validation });
     } catch (error: unknown) {
       const maybeMongoError = error as { code?: number };
       if (maybeMongoError.code === 11000) {
-        res.status(409).json({ message: 'Staff is already assigned to this shift' });
+        res.status(409).json({
+          message: 'Staff is already assigned to this shift',
+          ok: false,
+          violations: [
+            {
+              code: 'ALREADY_ASSIGNED',
+              message: 'Staff member is already assigned to this shift.',
+              details: { shiftId: shiftObjectId.toString(), staffId: staffObjectId.toString() },
+            },
+          ],
+          suggestions: [],
+        });
         return;
       }
       throw error;

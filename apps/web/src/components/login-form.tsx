@@ -1,7 +1,7 @@
-'use client';
-
 import { FormEvent, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter } from 'next/router';
+import { ApiError, login } from '@/lib/api';
+import { setToken } from '@/lib/api/auth';
 
 export function LoginForm() {
   const router = useRouter();
@@ -15,26 +15,26 @@ export function LoginForm() {
     setLoading(true);
     setError(null);
 
-    const response = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-
-    if (!response.ok) {
-      const payload = (await response.json()) as { message?: string };
-      setError(payload.message ?? 'Unable to sign in');
+    try {
+      const payload = await login(email, password);
+      setToken(payload.token);
+      await router.push('/dashboard');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setError(error.message || 'Unable to sign in');
+      } else {
+        setError('Unable to reach the server. Please try again.');
+      }
+    } finally {
       setLoading(false);
-      return;
     }
-
-    router.push('/dashboard');
-    router.refresh();
   };
 
   return (
     <form className="space-y-4" onSubmit={submit}>
-      <h2 className="font-[var(--font-heading)] text-2xl font-semibold text-ink">Log In</h2>
+      <h2 className="font-[family-name:var(--font-heading)] text-2xl font-semibold text-ink">
+        Log In
+      </h2>
       <label className="block">
         <span className="mb-1 block text-sm">Email</span>
         <input

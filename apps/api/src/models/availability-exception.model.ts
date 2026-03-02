@@ -1,6 +1,6 @@
 import { Schema, Types, model } from 'mongoose';
 
-export type AvailabilityExceptionType = 'available' | 'unavailable';
+export type AvailabilityExceptionType = 'available' | 'unavailable' | 'allow' | 'block';
 
 export interface AvailabilityExceptionDoc {
   staffId: Types.ObjectId;
@@ -19,7 +19,7 @@ const availabilityExceptionSchema = new Schema<AvailabilityExceptionDoc>(
     staffId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     dateLocal: { type: String, required: true },
     timezone: { type: String, required: true },
-    type: { type: String, enum: ['available', 'unavailable'], required: true },
+    type: { type: String, enum: ['available', 'unavailable', 'allow', 'block'], required: true },
     startLocalTime: { type: String },
     endLocalTime: { type: String },
     reason: { type: String },

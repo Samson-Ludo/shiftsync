@@ -1,14 +1,24 @@
-'use client';
-
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DateTime } from 'luxon';
-import { CurrentUser, ShiftItem } from '@/lib/types';
+import {
+  ApiError,
+  AssignmentValidationResponse,
+  CurrentUser,
+  ShiftItem,
+  StaffOption,
+  assignStaff,
+  createShift as createShiftRequest,
+  listShifts,
+  listStaff,
+  validateAssign,
+} from '@/lib/api';
 import { NotificationCenter } from './notification-center';
 
 const mondayIso = () => DateTime.now().startOf('week').toISODate() ?? DateTime.now().toISODate()!;
 
 type CreateFormState = {
   title: string;
+  requiredSkill: string;
   localDate: string;
   startLocalTime: string;
   endLocalTime: string;
@@ -16,9 +26,42 @@ type CreateFormState = {
 
 const initialCreateForm: CreateFormState = {
   title: 'New Shift',
+  requiredSkill: 'line_cook',
   localDate: DateTime.now().toISODate() ?? '',
   startLocalTime: '09:00',
   endLocalTime: '17:00',
+};
+
+const fallbackValidation: AssignmentValidationResponse = {
+  ok: false,
+  violations: [],
+  suggestions: [],
+};
+
+const toValidationResponse = (data: unknown): AssignmentValidationResponse | null => {
+  if (!data || typeof data !== 'object') {
+    return null;
+  }
+
+  const maybeValidation = data as Partial<AssignmentValidationResponse>;
+
+  return {
+    ok: Boolean(maybeValidation.ok),
+    violations: Array.isArray(maybeValidation.violations)
+      ? (maybeValidation.violations as AssignmentValidationResponse['violations'])
+      : [],
+    suggestions: Array.isArray(maybeValidation.suggestions)
+      ? (maybeValidation.suggestions as AssignmentValidationResponse['suggestions'])
+      : [],
+  };
+};
+
+const getErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof ApiError && error.message) {
+    return error.message;
+  }
+
+  return fallback;
 };
 
 export function ManagerDashboard({ user }: { user: CurrentUser }) {
@@ -26,14 +69,32 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
   const [locationId, setLocationId] = useState(locations[0]?._id ?? '');
   const [weekStart, setWeekStart] = useState(mondayIso());
   const [shifts, setShifts] = useState<ShiftItem[]>([]);
+  const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
+  const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
+  const [selectedStaffId, setSelectedStaffId] = useState<string>('');
+  const [validation, setValidation] = useState<AssignmentValidationResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [staffLoading, setStaffLoading] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [assigning, setAssigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [assignmentMessage, setAssignmentMessage] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState<CreateFormState>(initialCreateForm);
 
   const selectedLocation = useMemo(
     () => locations.find((location) => location._id === locationId),
     [locations, locationId],
+  );
+
+  const selectedShift = useMemo(
+    () => shifts.find((shift) => shift._id === selectedShiftId) ?? null,
+    [shifts, selectedShiftId],
+  );
+
+  const selectedStaff = useMemo(
+    () => staffOptions.find((staff) => staff.id === selectedStaffId) ?? null,
+    [staffOptions, selectedStaffId],
   );
 
   const loadShifts = useCallback(async () => {
@@ -43,47 +104,126 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
 
     setLoading(true);
     setError(null);
-    const query = new URLSearchParams({ locationId, weekStart }).toString();
-    const response = await fetch(`/api/shifts?${query}`, { cache: 'no-store' });
 
-    if (!response.ok) {
-      const payload = (await response.json()) as { message?: string };
-      setError(payload.message ?? 'Failed to load shifts');
+    try {
+      const payload = await listShifts(locationId, weekStart);
+      const nextShifts = payload.shifts ?? [];
+
+      setShifts(nextShifts);
+
+      if (nextShifts.length === 0) {
+        setSelectedShiftId(null);
+        setValidation(null);
+      } else if (!selectedShiftId || !nextShifts.some((shift) => shift._id === selectedShiftId)) {
+        setSelectedShiftId(nextShifts[0]._id);
+        setValidation(null);
+      }
+    } catch (loadError) {
+      setError(getErrorMessage(loadError, 'Failed to load shifts'));
+    } finally {
       setLoading(false);
+    }
+  }, [locationId, weekStart, selectedShiftId]);
+
+  const loadStaffOptions = useCallback(async () => {
+    if (!locationId) {
       return;
     }
 
-    const payload = (await response.json()) as { shifts: ShiftItem[] };
-    setShifts(payload.shifts ?? []);
-    setLoading(false);
-  }, [locationId, weekStart]);
+    setStaffLoading(true);
+
+    try {
+      const payload = await listStaff(locationId);
+      setStaffOptions(payload.staff ?? []);
+    } catch (loadError) {
+      setError(getErrorMessage(loadError, 'Failed to load staff'));
+    } finally {
+      setStaffLoading(false);
+    }
+  }, [locationId]);
+
+  const runValidation = useCallback(async () => {
+    if (!selectedShiftId || !selectedStaffId) {
+      setValidation(null);
+      return;
+    }
+
+    setValidating(true);
+    setAssignmentMessage(null);
+
+    try {
+      const payload = await validateAssign(selectedShiftId, selectedStaffId);
+      setValidation(payload);
+    } catch (validationError) {
+      if (validationError instanceof ApiError && validationError.status === 409) {
+        setValidation(toValidationResponse(validationError.data) ?? fallbackValidation);
+      } else {
+        setError(getErrorMessage(validationError, 'Failed to validate assignment'));
+        setValidation(null);
+      }
+    } finally {
+      setValidating(false);
+    }
+  }, [selectedShiftId, selectedStaffId]);
 
   useEffect(() => {
     void loadShifts();
   }, [loadShifts]);
 
-  const createShift = async () => {
-    const response = await fetch('/api/shifts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        locationId,
-        title: createForm.title,
-        localDate: createForm.localDate,
-        startLocalTime: createForm.startLocalTime,
-        endLocalTime: createForm.endLocalTime,
-      }),
-    });
+  useEffect(() => {
+    void loadStaffOptions();
+  }, [loadStaffOptions]);
 
-    if (!response.ok) {
-      const payload = (await response.json()) as { message?: string };
-      setError(payload.message ?? 'Failed to create shift');
+  useEffect(() => {
+    void runValidation();
+  }, [runValidation]);
+
+  const createShift = async () => {
+    if (!locationId) {
+      setError('Choose a location before creating a shift.');
       return;
     }
 
-    setShowCreateModal(false);
-    setCreateForm(initialCreateForm);
-    await loadShifts();
+    try {
+      await createShiftRequest({
+        locationId,
+        title: createForm.title,
+        requiredSkill: createForm.requiredSkill,
+        localDate: createForm.localDate,
+        startLocalTime: createForm.startLocalTime,
+        endLocalTime: createForm.endLocalTime,
+      });
+
+      setShowCreateModal(false);
+      setCreateForm(initialCreateForm);
+      await loadShifts();
+    } catch (createError) {
+      setError(getErrorMessage(createError, 'Failed to create shift'));
+    }
+  };
+
+  const assignSelectedStaff = async () => {
+    if (!selectedShiftId || !selectedStaffId) {
+      return;
+    }
+
+    setAssigning(true);
+    setAssignmentMessage(null);
+
+    try {
+      await assignStaff(selectedShiftId, selectedStaffId);
+      setValidation({ ok: true, violations: [], suggestions: [] });
+      setAssignmentMessage('Assignment saved successfully.');
+      setError(null);
+      await loadShifts();
+    } catch (assignError) {
+      if (assignError instanceof ApiError && assignError.status === 409) {
+        setValidation(toValidationResponse(assignError.data) ?? fallbackValidation);
+      }
+      setError(getErrorMessage(assignError, 'Unable to assign staff'));
+    } finally {
+      setAssigning(false);
+    }
   };
 
   return (
@@ -91,7 +231,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
       <header className="panel flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Manager Dashboard</p>
-          <h1 className="font-[var(--font-heading)] text-2xl font-semibold">ShiftSync</h1>
+          <h1 className="font-[family-name:var(--font-heading)] text-2xl font-semibold">ShiftSync</h1>
           <p className="text-sm text-slate-600">
             {user.firstName} {user.lastName} ({user.role})
           </p>
@@ -102,7 +242,11 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
             <select
               className="input"
               value={locationId}
-              onChange={(event) => setLocationId(event.target.value)}
+              onChange={(event) => {
+                setLocationId(event.target.value);
+                setSelectedStaffId('');
+                setValidation(null);
+              }}
             >
               {locations.map((location) => (
                 <option key={location._id} value={location._id}>
@@ -126,7 +270,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
       <section className="grid gap-4 lg:grid-cols-[2fr_1fr]">
         <article className="panel p-5">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="font-[var(--font-heading)] text-lg font-semibold">
+            <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">
               Shifts {selectedLocation ? `- ${selectedLocation.code}` : ''}
             </h2>
             <button className="btn-primary" onClick={() => setShowCreateModal(true)}>
@@ -137,7 +281,17 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
           {error ? <p className="mb-3 text-sm text-red-600">{error}</p> : null}
           <ul className="space-y-3">
             {shifts.map((shift) => (
-              <li key={shift._id} className="rounded-md border border-slate-200 p-3">
+              <li
+                key={shift._id}
+                className={`cursor-pointer rounded-md border p-3 ${
+                  selectedShiftId === shift._id ? 'border-sea bg-cyan-50' : 'border-slate-200'
+                }`}
+                onClick={() => {
+                  setSelectedShiftId(shift._id);
+                  setValidation(null);
+                  setAssignmentMessage(null);
+                }}
+              >
                 <div className="flex items-center justify-between">
                   <h3 className="font-medium">{shift.title}</h3>
                   <span
@@ -151,7 +305,9 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                 <p className="mt-1 text-sm text-slate-600">
                   {shift.localDate} {shift.startLocalTime}-{shift.endLocalTime} ({shift.timezone})
                 </p>
-                <p className="mt-1 text-xs text-slate-500">Assignments: {shift.assignments?.length ?? 0}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Required skill: {shift.requiredSkill ?? 'none'} | Assignments: {shift.assignments?.length ?? 0}
+                </p>
               </li>
             ))}
             {!loading && shifts.length === 0 ? (
@@ -164,10 +320,101 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
 
         <aside className="space-y-4">
           <section className="panel p-5">
-            <h2 className="font-[var(--font-heading)] text-lg font-semibold">Shift Details</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              Placeholder panel for selected shift details, assignment controls, and swap impact.
-            </p>
+            <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">Shift Details</h2>
+            {!selectedShift ? (
+              <p className="mt-2 text-sm text-slate-600">Select a shift to assign staff.</p>
+            ) : (
+              <div className="mt-3 space-y-4 text-sm">
+                <div>
+                  <p className="font-medium">{selectedShift.title}</p>
+                  <p className="text-slate-600">
+                    {selectedShift.localDate} {selectedShift.startLocalTime}-{selectedShift.endLocalTime}
+                  </p>
+                  <p className="text-slate-600">
+                    Required skill: {selectedShift.requiredSkill ?? 'none'}
+                  </p>
+                </div>
+
+                <div>
+                  <label>
+                    <span className="mb-1 block text-xs text-slate-500">Assign staff</span>
+                    <select
+                      className="input"
+                      value={selectedStaffId}
+                      onChange={(event) => {
+                        setSelectedStaffId(event.target.value);
+                        setValidation(null);
+                        setAssignmentMessage(null);
+                      }}
+                    >
+                      <option value="">Select staff member...</option>
+                      {staffOptions.map((staff) => (
+                        <option key={staff.id} value={staff.id}>
+                          {staff.name} ({staff.email})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {staffLoading ? <p className="mt-2 text-xs text-slate-500">Loading staff...</p> : null}
+                  {selectedStaff ? (
+                    <p className="mt-2 text-xs text-slate-500">
+                      Skills: {selectedStaff.skills.join(', ') || 'none'}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-2">
+                  {validating ? <p className="text-xs text-slate-500">Validating constraints...</p> : null}
+
+                  {validation?.ok ? (
+                    <p className="rounded-md bg-green-100 p-2 text-xs text-green-700">
+                      All constraints passed. You can assign this staff member.
+                    </p>
+                  ) : null}
+
+                  {!validation?.ok && validation?.violations?.length ? (
+                    <div className="rounded-md bg-red-50 p-2">
+                      <p className="mb-2 text-xs font-semibold text-red-700">Constraint violations</p>
+                      <ul className="space-y-1 text-xs text-red-700">
+                        {validation.violations.map((violation, index) => (
+                          <li key={`${violation.code}-${index}`}>- {violation.message}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {!validation?.ok && validation?.suggestions?.length ? (
+                    <div className="rounded-md bg-slate-100 p-2">
+                      <p className="mb-2 text-xs font-semibold text-slate-700">Suggested alternatives</p>
+                      <div className="space-y-1">
+                        {validation.suggestions.map((suggestion) => (
+                          <button
+                            key={suggestion.staffId}
+                            className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-left text-xs hover:bg-slate-50"
+                            onClick={() => setSelectedStaffId(suggestion.staffId)}
+                          >
+                            <span className="font-semibold">{suggestion.name}</span>
+                            <span className="block text-slate-600">{suggestion.reason}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {assignmentMessage ? (
+                    <p className="rounded-md bg-green-100 p-2 text-xs text-green-700">{assignmentMessage}</p>
+                  ) : null}
+                </div>
+
+                <button
+                  className="btn-primary w-full"
+                  disabled={!validation?.ok || assigning || !selectedStaffId}
+                  onClick={() => void assignSelectedStaff()}
+                >
+                  {assigning ? 'Assigning...' : 'Confirm Assign'}
+                </button>
+              </div>
+            )}
           </section>
           <NotificationCenter />
         </aside>
@@ -176,13 +423,21 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
       {showCreateModal ? (
         <div className="fixed inset-0 z-10 flex items-center justify-center bg-slate-900/50 p-4">
           <div className="panel w-full max-w-md p-5">
-            <h2 className="font-[var(--font-heading)] text-lg font-semibold">Create Shift</h2>
+            <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">Create Shift</h2>
             <div className="mt-4 space-y-3">
               <input
                 className="input"
                 placeholder="Shift title"
                 value={createForm.title}
                 onChange={(event) => setCreateForm((curr) => ({ ...curr, title: event.target.value }))}
+              />
+              <input
+                className="input"
+                placeholder="Required skill (e.g. line_cook)"
+                value={createForm.requiredSkill}
+                onChange={(event) =>
+                  setCreateForm((curr) => ({ ...curr, requiredSkill: event.target.value }))
+                }
               />
               <input
                 className="input"
@@ -212,7 +467,10 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
               </div>
             </div>
             <div className="mt-5 flex justify-end gap-2">
-              <button className="rounded-md border border-slate-300 px-4 py-2 text-sm" onClick={() => setShowCreateModal(false)}>
+              <button
+                className="rounded-md border border-slate-300 px-4 py-2 text-sm"
+                onClick={() => setShowCreateModal(false)}
+              >
                 Cancel
               </button>
               <button className="btn-primary" onClick={() => void createShift()}>

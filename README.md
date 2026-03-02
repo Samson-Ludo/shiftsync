@@ -4,7 +4,7 @@ Foundational end-to-end MVP for **ShiftSync**, a multi-location staff scheduling
 
 ## Stack
 
-- Frontend: Next.js App Router + TypeScript + Tailwind CSS + Socket.IO client
+- Frontend: Next.js Pages Router + TypeScript + Tailwind CSS + Socket.IO client
 - Backend: Express + TypeScript + Mongoose + Zod + JWT + Socket.IO server
 - DB: MongoDB Atlas
 - Target deploys: Netlify (web), Render (api), MongoDB Atlas
@@ -51,7 +51,6 @@ CUTOFF_HOURS=48
 ```env
 NEXT_PUBLIC_APP_NAME=ShiftSync
 NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
-API_BASE_URL=http://localhost:4000
 ```
 
 3. Seed database:
@@ -110,9 +109,19 @@ All seeded users use password: `Pass123!`
 - `POST /shifts/:id/publish`
 - `POST /shifts/:id/unpublish`
 - `POST /shifts/:id/assign`
+- `POST /shifts/:id/validate-assign/:staffId`
 - `DELETE /shifts/:id/assignments/:assignmentId`
+- `GET /staff?locationId=<id>`
 - `POST /swap-requests` (placeholder, returns 501)
 - `GET /analytics/schedule-health` (placeholder, returns 501)
+
+## Frontend Architecture Rules
+
+- Routing is Pages Router only (`apps/web/src/pages`).
+- No Next.js API proxy routes are used.
+- All backend calls from the web app go through `apps/web/src/lib/api` Axios wrappers.
+- JWT is stored in browser `localStorage` for take-home speed/simplicity.
+  - This is intentionally temporary and should be upgraded to httpOnly cookies in production.
 
 ## RBAC Rules Implemented
 
@@ -123,18 +132,36 @@ All seeded users use password: `Pass123!`
 ## Manual Test Steps
 
 1. Run seed and log in as manager (`maya.manager@coastaleats.com`).
-2. In manager dashboard, switch locations and week start; confirm only assigned locations appear.
-3. Create a shift (including overnight pattern like `23:00` to `03:00`) and verify it appears.
-4. Use staff login and confirm dashboard only shows published schedule + own assignments.
-5. Check notifications panel and mark an unread notification as read.
-6. Call `POST /shifts/:id/unpublish` or `PATCH /shifts/:id` for a near-term shift and confirm 48h cutoff blocks it.
+2. Confirm web uses Pages routes:
+   - `/login`, `/dashboard`, `/manager`, `/staff`, `/notifications`
+3. Confirm API calls are direct to `NEXT_PUBLIC_API_BASE_URL` by checking the browser network tab (no `/api/*` requests).
+4. In manager dashboard, switch locations and week start; confirm only assigned locations appear.
+5. Select a shift in manager dashboard and test assignment constraints:
+   - `Unavailable Test Shift` + `Ava Ramirez` => availability violation
+   - `Brunch Rush` + non-barista staff => required skill violation
+   - `Uncertified Test Shift` + NYC-only staff => location certification violation
+   - `Conflict Candidate B` + `Mason Reed` => overlap violation (already assigned to `Conflict Candidate A`)
+   - `Rest Gap Test Shift` + `Isabella Scott` => minimum rest violation after overnight shift
+6. Confirm suggestions appear for failing validations and click one to preselect.
+7. Confirm assign only works when validation is `ok: true`.
+8. Use staff login and confirm dashboard only shows published schedule + own assignments.
+9. Check notifications panel and mark an unread notification as read.
+10. Call `POST /shifts/:id/unpublish` or `PATCH /shifts/:id` for a near-term shift and confirm 48h cutoff blocks it.
+
+## Constraint Tests
+
+Run minimal backend unit tests for temporal constraints:
+
+```bash
+npm run test:constraints -w apps/api
+```
 
 ## Deployment Notes
 
 - **Web (Netlify)**:
   - Build command: `npm run build -w apps/web`
   - Publish directory: `apps/web/.next`
-  - Env vars: `NEXT_PUBLIC_API_BASE_URL`, `API_BASE_URL`
+  - Env vars: `NEXT_PUBLIC_API_BASE_URL`
 - **API (Render)**:
   - Build command: `npm run build -w apps/api`
   - Start command: `npm run start -w apps/api`
@@ -144,6 +171,7 @@ All seeded users use password: `Pass123!`
 
 ## Notes / TODOs
 
-- Assignment constraints (availability, overtime, double-booking checks) are intentionally deferred and marked TODO.
+- Assignment constraints now enforce overlap, minimum rest, required skill, certification, and availability windows.
+- Overtime cap and labor law policy checks remain TODO for a later iteration.
 - Pending swap request cancellation hooks are structured in place for edit/publish flows; richer notifications are TODO.
 - No shared `packages/` types package added yet to keep MVP simple and avoid premature abstraction.

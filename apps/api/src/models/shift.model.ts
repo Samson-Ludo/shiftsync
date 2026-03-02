@@ -3,6 +3,7 @@ import { Schema, Types, model } from 'mongoose';
 export interface ShiftDoc {
   locationId: Types.ObjectId;
   title: string;
+  requiredSkill?: string;
   timezone: string;
   localDate: string;
   startLocalTime: string;
@@ -22,6 +23,7 @@ const shiftSchema = new Schema<ShiftDoc>(
   {
     locationId: { type: Schema.Types.ObjectId, ref: 'Location', required: true },
     title: { type: String, required: true },
+    requiredSkill: { type: String },
     timezone: { type: String, required: true },
     localDate: { type: String, required: true },
     startLocalTime: { type: String, required: true },

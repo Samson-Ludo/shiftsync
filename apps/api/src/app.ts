@@ -7,6 +7,7 @@ import { deferredRouter } from './routes/deferred.routes.js';
 import { healthRouter } from './routes/health.routes.js';
 import { shiftsRouter } from './routes/shifts.routes.js';
 import { notificationRouter } from './routes/notification.routes.js';
+import { staffRouter } from './routes/staff.routes.js';
 import { errorHandler, notFoundHandler } from './middleware/error-handler.js';
 
 export const createApp = () => {
@@ -25,6 +26,7 @@ export const createApp = () => {
   app.use('/auth', authRouter);
   app.use('/shifts', shiftsRouter);
   app.use('/notifications', notificationRouter);
+  app.use('/staff', staffRouter);
   app.use(deferredRouter);
 
   app.use(notFoundHandler);
