@@ -1,0 +1,28 @@
+{
+  "name": "shiftsync-monorepo",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "format": "prettier --check .",
+    "format:write": "prettier --write .",
+    "seed": "npm run seed -w apps/api"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^8.26.0",
+    "@typescript-eslint/parser": "^8.26.0",
+    "concurrently": "^9.1.2",
+    "eslint": "^9.21.0",
+    "eslint-config-next": "^15.2.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2"
+  }
+}
