@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/router';
 import { ApiError, login } from '@/lib/api';
 import { setToken } from '@/lib/api/auth';
+import { connectSocketWithStoredToken } from '@/lib/socket';
 
 export function LoginForm() {
   const router = useRouter();
@@ -18,6 +19,7 @@ export function LoginForm() {
     try {
       const payload = await login(email, password);
       setToken(payload.token);
+      connectSocketWithStoredToken();
       await router.push('/dashboard');
     } catch (error) {
       if (error instanceof ApiError) {

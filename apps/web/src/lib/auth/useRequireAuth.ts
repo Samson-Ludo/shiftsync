@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { CurrentUser, UserRole, me } from '@/lib/api';
 import { clearToken, getToken } from '@/lib/api/auth';
+import { connectSocketWithStoredToken } from '@/lib/socket';
 
 type UseRequireAuthOptions = {
   allowedRoles?: UserRole[];
@@ -52,6 +53,7 @@ export const useRequireAuth = (options: UseRequireAuthOptions = {}) => {
           return;
         }
 
+        connectSocketWithStoredToken();
         setUser(currentUser);
       } catch {
         if (!active) {

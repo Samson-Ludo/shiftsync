@@ -123,6 +123,23 @@ All seeded users use password: `Pass123!`
 - JWT is stored in browser `localStorage` for take-home speed/simplicity.
   - This is intentionally temporary and should be upgraded to httpOnly cookies in production.
 
+## Assignment Concurrency Model
+
+Assignment creation now uses a lock + transaction + revalidation sequence to prevent race conditions:
+
+1. Acquire reservation lock in `Lock` collection with key `staff:{staffId}` and TTL ~15 seconds.
+2. Start MongoDB transaction (Mongoose session).
+3. Re-run `validateAssignment(...)` inside the same transaction/session.
+4. Create `ShiftAssignment` and notifications in the transaction.
+5. Commit transaction.
+6. Release lock in `finally` (TTL remains as safety if release fails).
+
+Conflict handling:
+
+- If lock acquisition fails, API returns `409` with `code: "conflict_detected"` and emits `conflict_detected` to manager room `user:{userId}`.
+- If revalidation fails inside transaction, API returns `409` with `code: "conflict_detected"` plus violations/suggestions, and emits `conflict_detected`.
+- On success, API emits `assignment_created` to `location:{locationId}` so managers refresh without full page reload.
+
 ## RBAC Rules Implemented
 
 - Admin: full visibility and management actions
@@ -147,6 +164,12 @@ All seeded users use password: `Pass123!`
 8. Use staff login and confirm dashboard only shows published schedule + own assignments.
 9. Check notifications panel and mark an unread notification as read.
 10. Call `POST /shifts/:id/unpublish` or `PATCH /shifts/:id` for a near-term shift and confirm 48h cutoff blocks it.
+11. Concurrency test (two manager windows):
+   - Open two browser windows and log in as managers who can access the same location.
+   - Pick two different shifts and the same staff member.
+   - Click **Confirm Assign** in both windows at nearly the same time.
+   - Expected: exactly one request succeeds; the other returns `409 conflict_detected`.
+   - Expected UI: losing manager immediately sees a conflict banner via Socket.IO, and successful assignment emits `assignment_created` causing live shift list refresh.
 
 ## Constraint Tests
 

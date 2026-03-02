@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { Types } from 'mongoose';
+import mongoose, { Types } from 'mongoose';
 import { z } from 'zod';
 import { env } from '../config/env.js';
 import { authenticateJwt, AuthenticatedRequest } from '../middleware/auth.js';
@@ -14,6 +14,12 @@ import {
 } from '../models/index.js';
 import { canManageLocation, getStaffCertifiedLocationIds } from '../services/access.service.js';
 import { validateAssignment } from '../services/assignmentValidator.js';
+import {
+  acquireReservationLock,
+  buildStaffLockKey,
+  releaseReservationLock,
+  ResourceLockedError,
+} from '../services/lock.service.js';
 import { cancelPendingSwapRequestsForShift } from '../services/swap.service.js';
 import { computeWeekStart, hoursUntilUtc, resolveShiftUtcWindow, utcToLocationString } from '../utils/time.js';
 
@@ -104,6 +110,53 @@ const parseObjectId = (value: unknown): Types.ObjectId | null => {
     return null;
   }
   return new Types.ObjectId(singleValue);
+};
+
+type ConflictEventPayload = {
+  code: 'conflict_detected';
+  message: string;
+  shiftId: string;
+  staffId: string;
+  detectedAtUtc: string;
+};
+
+class RouteHttpError extends Error {
+  status: number;
+  payload: Record<string, unknown>;
+
+  constructor(status: number, payload: Record<string, unknown>) {
+    super((typeof payload.message === 'string' ? payload.message : 'Request failed') as string);
+    this.name = 'RouteHttpError';
+    this.status = status;
+    this.payload = payload;
+  }
+}
+
+class AssignmentConflictError extends Error {
+  validation: Awaited<ReturnType<typeof validateAssignment>>;
+
+  constructor(validation: Awaited<ReturnType<typeof validateAssignment>>) {
+    super('Assignment conflict detected');
+    this.name = 'AssignmentConflictError';
+    this.validation = validation;
+  }
+}
+
+const emitConflictDetected = (
+  req: AuthenticatedRequest,
+  userId: string,
+  payload: Omit<ConflictEventPayload, 'code' | 'detectedAtUtc'>,
+): void => {
+  const io = req.app.get('io');
+  if (!io) {
+    return;
+  }
+
+  io.to(`user:${userId}`).emit('conflict_detected', {
+    code: 'conflict_detected',
+    ...payload,
+    detectedAtUtc: new Date().toISOString(),
+  } satisfies ConflictEventPayload);
 };
 
 export const shiftsRouter = Router();
@@ -537,105 +590,255 @@ shiftsRouter.post(
       return;
     }
 
-    const shift = await ShiftModel.findById(shiftObjectId).lean();
-    if (!shift) {
-      res.status(404).json({ message: 'Shift not found' });
-      return;
-    }
+    const lockOwner = `${user.userId}:${Date.now()}:${new Types.ObjectId().toString()}`;
+    const lockKey = buildStaffLockKey(staffObjectId.toString());
+    let lockAcquired: Awaited<ReturnType<typeof acquireReservationLock>> | null = null;
+    let session: mongoose.ClientSession | null = null;
 
-    if (user.role === 'manager') {
-      const allowed = await canManageLocation(user, shift.locationId.toString());
-      if (!allowed) {
-        res.status(403).json({ message: 'Cannot assign for this shift' });
+    let persistedAssignment:
+      | {
+          shift: {
+            _id: Types.ObjectId;
+            locationId: Types.ObjectId;
+            title: string;
+            localDate: string;
+            startLocalTime: string;
+            endLocalTime: string;
+          };
+          staff: { firstName: string; lastName: string };
+          assignment: {
+            _id: Types.ObjectId;
+            shiftId: Types.ObjectId;
+            staffId: Types.ObjectId;
+            assignedBy: Types.ObjectId;
+            status: string;
+          };
+        }
+      | null = null;
+
+    try {
+      lockAcquired = await acquireReservationLock({
+        key: lockKey,
+        owner: lockOwner,
+        ttlSeconds: 15,
+      });
+    } catch (error: unknown) {
+      if (error instanceof ResourceLockedError) {
+        const conflictMessage =
+          'Assignment conflict detected. Another manager is currently assigning this staff member.';
+        emitConflictDetected(req, user.userId, {
+          message: conflictMessage,
+          shiftId: shiftObjectId.toString(),
+          staffId: staffObjectId.toString(),
+        });
+        res.status(409).json({
+          code: 'conflict_detected',
+          message: conflictMessage,
+        });
         return;
       }
-    }
-
-    const validation = await validateAssignment({
-      shiftId: shiftObjectId.toString(),
-      staffId: staffObjectId.toString(),
-      actorId: user.userId,
-    });
-
-    if (!validation.ok) {
-      res.status(409).json({
-        message: 'Assignment blocked by constraints',
-        ...validation,
-      });
-      return;
-    }
-
-    const staffUser = await UserModel.findOne({ _id: staffObjectId, role: 'staff', active: true })
-      .select('firstName lastName')
-      .lean();
-
-    if (!staffUser) {
-      res.status(404).json({ message: 'Staff user not found' });
-      return;
+      throw error;
     }
 
     try {
-      const assignment = await ShiftAssignmentModel.create({
-        shiftId: shiftObjectId,
-        staffId: staffObjectId,
-        assignedBy: new Types.ObjectId(user.userId),
-        status: 'assigned',
-      });
+      session = await mongoose.startSession();
 
-      await NotificationModel.insertMany([
-        {
-          userId: staffObjectId,
-          type: 'assignment',
-          title: 'New shift assignment',
-          body: `You were assigned to ${shift.title} on ${shift.localDate} (${shift.startLocalTime}-${shift.endLocalTime}).`,
-          read: false,
-          metadata: { shiftId: shift._id.toString() },
-        },
-        {
-          userId: new Types.ObjectId(user.userId),
-          type: 'assignment_action',
-          title: 'Assignment recorded',
-          body: `You assigned ${staffUser.firstName} ${staffUser.lastName} to ${shift.title}.`,
-          read: false,
-          metadata: {
-            shiftId: shift._id.toString(),
-            staffId: staffObjectId.toString(),
+      let txValidation: Awaited<ReturnType<typeof validateAssignment>> = {
+        ok: false,
+        violations: [],
+        suggestions: [],
+      };
+
+      session.startTransaction();
+      try {
+        const shift = await ShiftModel.findById(shiftObjectId)
+          .select('locationId title localDate startLocalTime endLocalTime')
+          .session(session)
+          .lean();
+        if (!shift) {
+          throw new RouteHttpError(404, { message: 'Shift not found' });
+        }
+
+        if (user.role === 'manager') {
+          const allowed = await canManageLocation(user, shift.locationId.toString());
+          if (!allowed) {
+            throw new RouteHttpError(403, { message: 'Cannot assign for this shift' });
+          }
+        }
+
+        const staffUser = await UserModel.findOne({
+          _id: staffObjectId,
+          role: 'staff',
+          active: true,
+        })
+          .select('firstName lastName')
+          .session(session)
+          .lean();
+
+        if (!staffUser) {
+          throw new RouteHttpError(404, { message: 'Staff user not found' });
+        }
+
+        txValidation = await validateAssignment({
+          shiftId: shiftObjectId.toString(),
+          staffId: staffObjectId.toString(),
+          actorId: user.userId,
+          session,
+        });
+
+        if (!txValidation.ok) {
+          throw new AssignmentConflictError(txValidation);
+        }
+
+        const createdAssignments = await ShiftAssignmentModel.create(
+          [
+            {
+              shiftId: shiftObjectId,
+              staffId: staffObjectId,
+              assignedBy: new Types.ObjectId(user.userId),
+              status: 'assigned',
+            },
+          ],
+          { session },
+        );
+
+        const assignment = createdAssignments[0];
+
+        await NotificationModel.insertMany(
+          [
+            {
+              userId: staffObjectId,
+              type: 'assignment',
+              title: 'New shift assignment',
+              body: `You were assigned to ${shift.title} on ${shift.localDate} (${shift.startLocalTime}-${shift.endLocalTime}).`,
+              read: false,
+              metadata: { shiftId: shift._id.toString() },
+            },
+            {
+              userId: new Types.ObjectId(user.userId),
+              type: 'assignment_action',
+              title: 'Assignment recorded',
+              body: `You assigned ${staffUser.firstName} ${staffUser.lastName} to ${shift.title}.`,
+              read: false,
+              metadata: {
+                shiftId: shift._id.toString(),
+                staffId: staffObjectId.toString(),
+              },
+            },
+          ],
+          { session },
+        );
+
+        persistedAssignment = {
+          shift: {
+            _id: shift._id,
+            locationId: shift.locationId,
+            title: shift.title,
+            localDate: shift.localDate,
+            startLocalTime: shift.startLocalTime,
+            endLocalTime: shift.endLocalTime,
           },
-        },
-      ]);
+          staff: {
+            firstName: staffUser.firstName,
+            lastName: staffUser.lastName,
+          },
+          assignment: {
+            _id: assignment._id,
+            shiftId: assignment.shiftId,
+            staffId: assignment.staffId,
+            assignedBy: assignment.assignedBy,
+            status: assignment.status,
+          },
+        };
+
+        await session.commitTransaction();
+      } catch (txError) {
+        await session.abortTransaction();
+        throw txError;
+      }
+
+      if (!persistedAssignment) {
+        throw new RouteHttpError(500, { message: 'Assignment was not persisted' });
+      }
 
       const io = req.app.get('io');
       if (io) {
         io.to(`user:${staffObjectId.toString()}`).emit('notification:new', {
           type: 'assignment',
-          shiftId: shift._id.toString(),
+          shiftId: persistedAssignment.shift._id.toString(),
         });
 
         io.to(`user:${user.userId}`).emit('notification:new', {
           type: 'assignment_action',
-          shiftId: shift._id.toString(),
+          shiftId: persistedAssignment.shift._id.toString(),
+        });
+
+        io.to(`location:${persistedAssignment.shift.locationId.toString()}`).emit('assignment_created', {
+          assignmentId: persistedAssignment.assignment._id.toString(),
+          shiftId: persistedAssignment.shift._id.toString(),
+          staffId: staffObjectId.toString(),
+          staffName: `${persistedAssignment.staff.firstName} ${persistedAssignment.staff.lastName}`,
+          locationId: persistedAssignment.shift.locationId.toString(),
+          assignedBy: user.userId,
+          createdAtUtc: new Date().toISOString(),
         });
       }
 
-      res.status(201).json({ assignment, validation });
+      res.status(201).json({
+        assignment: persistedAssignment.assignment,
+        validation: { ok: true, violations: [], suggestions: [] },
+      });
     } catch (error: unknown) {
-      const maybeMongoError = error as { code?: number };
-      if (maybeMongoError.code === 11000) {
+      if (error instanceof RouteHttpError) {
+        res.status(error.status).json(error.payload);
+        return;
+      }
+
+      if (error instanceof AssignmentConflictError) {
+        const conflictMessage =
+          'Assignment conflict detected. Revalidation failed because another update changed availability.';
+        emitConflictDetected(req, user.userId, {
+          message: conflictMessage,
+          shiftId: shiftObjectId.toString(),
+          staffId: staffObjectId.toString(),
+        });
         res.status(409).json({
-          message: 'Staff is already assigned to this shift',
-          ok: false,
-          violations: [
-            {
-              code: 'ALREADY_ASSIGNED',
-              message: 'Staff member is already assigned to this shift.',
-              details: { shiftId: shiftObjectId.toString(), staffId: staffObjectId.toString() },
-            },
-          ],
-          suggestions: [],
+          code: 'conflict_detected',
+          message: conflictMessage,
+          ...error.validation,
         });
         return;
       }
+
+      const maybeMongoError = error as { code?: number };
+      if (maybeMongoError.code === 11000) {
+        const conflictMessage =
+          'Assignment conflict detected. This staff member was assigned by another request.';
+        emitConflictDetected(req, user.userId, {
+          message: conflictMessage,
+          shiftId: shiftObjectId.toString(),
+          staffId: staffObjectId.toString(),
+        });
+        res.status(409).json({
+          code: 'conflict_detected',
+          message: conflictMessage,
+        });
+        return;
+      }
+
       throw error;
+    } finally {
+      if (session) {
+        await session.endSession();
+      }
+
+      if (lockAcquired) {
+        try {
+          await releaseReservationLock(lockAcquired);
+        } catch {
+          // Lock has a short TTL; ignore release failures to avoid masking assignment results.
+        }
+      }
     }
   },
 );

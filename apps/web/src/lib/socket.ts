@@ -1,7 +1,9 @@
 import { io, Socket } from 'socket.io-client';
+import { getToken } from '@/lib/api/auth';
 
 let socketInstance: Socket | null = null;
 let socketKey: string | null = null;
+const defaultApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
 
 export const getSocket = (token: string | null, apiBaseUrl: string): Socket => {
   const nextKey = `${apiBaseUrl}::${token ?? 'anonymous'}`;
@@ -21,4 +23,13 @@ export const getSocket = (token: string | null, apiBaseUrl: string): Socket => {
   });
 
   return socketInstance;
+};
+
+export const connectSocketWithStoredToken = (): Socket | null => {
+  const token = getToken();
+  if (!token) {
+    return null;
+  }
+
+  return getSocket(token, defaultApiBaseUrl);
 };

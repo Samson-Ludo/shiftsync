@@ -44,7 +44,12 @@ export function NotificationCenter() {
   useEffect(() => {
     void fetchNotifications();
 
-    const socket = getSocket(getToken(), apiBaseUrl);
+    const token = getToken();
+    if (!token) {
+      return;
+    }
+
+    const socket = getSocket(token, apiBaseUrl);
     socket.on('socket:ready', () => setSocketReady(true));
     socket.on('notification:new', () => {
       void fetchNotifications();

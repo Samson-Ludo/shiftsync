@@ -12,6 +12,8 @@ import {
   listStaff,
   validateAssign,
 } from '@/lib/api';
+import { getToken } from '@/lib/api/auth';
+import { getSocket } from '@/lib/socket';
 import { NotificationCenter } from './notification-center';
 
 const mondayIso = () => DateTime.now().startOf('week').toISODate() ?? DateTime.now().toISODate()!;
@@ -22,6 +24,29 @@ type CreateFormState = {
   localDate: string;
   startLocalTime: string;
   endLocalTime: string;
+};
+
+type RealtimeBanner = {
+  tone: 'conflict' | 'info';
+  message: string;
+} | null;
+
+type ConflictDetectedEvent = {
+  code?: string;
+  message?: string;
+  shiftId?: string;
+  staffId?: string;
+  detectedAtUtc?: string;
+};
+
+type AssignmentCreatedEvent = {
+  assignmentId: string;
+  shiftId: string;
+  staffId: string;
+  staffName?: string;
+  locationId: string;
+  assignedBy: string;
+  createdAtUtc: string;
 };
 
 const initialCreateForm: CreateFormState = {
@@ -79,6 +104,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
   const [assigning, setAssigning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [assignmentMessage, setAssignmentMessage] = useState<string | null>(null);
+  const [realtimeBanner, setRealtimeBanner] = useState<RealtimeBanner>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState<CreateFormState>(initialCreateForm);
 
@@ -178,6 +204,58 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
     void runValidation();
   }, [runValidation]);
 
+  useEffect(() => {
+    if (!realtimeBanner) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setRealtimeBanner(null);
+    }, 6000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [realtimeBanner]);
+
+  useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      return;
+    }
+
+    const socket = getSocket(token, process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000');
+
+    const handleConflictDetected = (payload: ConflictDetectedEvent) => {
+      setRealtimeBanner({
+        tone: 'conflict',
+        message:
+          payload.message ??
+          'Assignment conflict detected. Another manager updated this staff assignment.',
+      });
+    };
+
+    const handleAssignmentCreated = (payload: AssignmentCreatedEvent) => {
+      if (!payload.locationId || payload.locationId !== locationId) {
+        return;
+      }
+
+      setRealtimeBanner({
+        tone: 'info',
+        message: `Live update: ${payload.staffName ?? 'A staff member'} was assigned.`,
+      });
+      void loadShifts();
+    };
+
+    socket.on('conflict_detected', handleConflictDetected);
+    socket.on('assignment_created', handleAssignmentCreated);
+
+    return () => {
+      socket.off('conflict_detected', handleConflictDetected);
+      socket.off('assignment_created', handleAssignmentCreated);
+    };
+  }, [locationId, loadShifts]);
+
   const createShift = async () => {
     if (!locationId) {
       setError('Choose a location before creating a shift.');
@@ -266,6 +344,18 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
           </label>
         </div>
       </header>
+
+      {realtimeBanner ? (
+        <section
+          className={`rounded-md border px-4 py-3 text-sm ${
+            realtimeBanner.tone === 'conflict'
+              ? 'border-red-200 bg-red-50 text-red-700'
+              : 'border-cyan-200 bg-cyan-50 text-cyan-800'
+          }`}
+        >
+          {realtimeBanner.message}
+        </section>
+      ) : null}
 
       <section className="grid gap-4 lg:grid-cols-[2fr_1fr]">
         <article className="panel p-5">
