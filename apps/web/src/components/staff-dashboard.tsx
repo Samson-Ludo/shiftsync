@@ -18,6 +18,9 @@ import {
 import { getToken } from '@/lib/api/auth';
 import { getSocket } from '@/lib/socket';
 import { NotificationCenter } from './notification-center';
+import { CardListSkeleton } from './skeleton/CardListSkeleton';
+import { EmptyState } from './state/EmptyState';
+import { ErrorState } from './state/ErrorState';
 
 const mondayIso = () => DateTime.now().startOf('week').toISODate() ?? DateTime.now().toISODate()!;
 
@@ -183,6 +186,10 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
 
     return Array.from(grouped.entries());
   }, [shifts]);
+  const showMyShiftsSkeleton = loading && myShifts.length === 0;
+  const showMyRequestsSkeleton = swapLoading && myRequests.length === 0;
+  const showAvailableDropsSkeleton = swapLoading && availableDrops.length === 0;
+  const showPublishedSkeleton = loading && publishedByLocation.length === 0;
 
   const openSwapModal = async (shift: ShiftItem) => {
     setSwapModalOpen(true);
@@ -306,17 +313,11 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
   };
 
   return (
-    <div className="space-y-6">
-      <header className="panel flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Staff Workspace</p>
-          <h2 className="font-[family-name:var(--font-heading)] text-2xl font-semibold text-ink">
-            Shift Exchange & Coverage
-          </h2>
-          <p className="text-sm text-slate-600">Request swaps, offer drops, and claim available coverage.</p>
-        </div>
+    <div className="space-y-6" aria-busy={loading || swapLoading || swapSuggestionsLoading || creatingSwap || undefined}>
+      <header className="panel p-5">
+        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Schedule Filters</p>
         <label>
-          <span className="mb-1 block text-xs text-slate-500">Week Start</span>
+          <span className="mb-1 mt-3 block text-xs text-slate-500">Week Start</span>
           <input
             className="input"
             type="date"
@@ -331,18 +332,14 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
           {swapMessage}
         </section>
       ) : null}
-      {swapError ? (
-        <section className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {swapError}
-        </section>
-      ) : null}
+      {error ? <ErrorState message={error} onRetry={() => void loadShifts()} /> : null}
+      {swapError ? <ErrorState title="Swap Workflow Error" message={swapError} onRetry={() => void loadSwapData()} /> : null}
 
       <section className="grid gap-4 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-4">
           <article id="my-shifts" className="panel p-5 scroll-mt-24">
             <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">My Shifts</h2>
-            {loading ? <p className="mt-3 text-sm text-slate-500">Loading shifts...</p> : null}
-            {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+            {showMyShiftsSkeleton ? <CardListSkeleton className="mt-3" count={3} /> : null}
             <ul className="mt-3 space-y-3">
               {myShifts.map((shift) => (
                 <li key={shift._id} className="rounded-md border border-slate-200 p-3">
@@ -365,8 +362,8 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
                 </li>
               ))}
               {!loading && myShifts.length === 0 ? (
-                <li className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-                  You have no assigned shifts this week.
+                <li>
+                  <EmptyState title="No Assigned Shifts" description="You have no assigned shifts for the selected week." />
                 </li>
               ) : null}
             </ul>
@@ -374,7 +371,7 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
 
           <article id="swap-requests" className="panel p-5 scroll-mt-24">
             <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">My Swap & Drop Requests</h2>
-            {swapLoading ? <p className="mt-3 text-sm text-slate-500">Loading requests...</p> : null}
+            {showMyRequestsSkeleton ? <CardListSkeleton className="mt-3" count={3} /> : null}
             <ul className="mt-3 space-y-3">
               {myRequests.map((request) => {
                 const canCancel =
@@ -427,8 +424,11 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
                 );
               })}
               {!swapLoading && myRequests.length === 0 ? (
-                <li className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-                  You have no swap/drop requests.
+                <li>
+                  <EmptyState
+                    title="No Swap Requests"
+                    description="Your swap and drop requests will appear here once created."
+                  />
                 </li>
               ) : null}
             </ul>
@@ -436,6 +436,7 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
 
           <article id="available-drops" className="panel p-5 scroll-mt-24">
             <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">Available Drop Requests</h2>
+            {showAvailableDropsSkeleton ? <CardListSkeleton className="mt-3" count={3} /> : null}
             <ul className="mt-3 space-y-3">
               {availableDrops.map((request) => (
                 <li key={request._id} className="rounded-md border border-slate-200 p-3">
@@ -459,8 +460,11 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
                 </li>
               ))}
               {!swapLoading && availableDrops.length === 0 ? (
-                <li className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-                  No claimable drop requests right now.
+                <li>
+                  <EmptyState
+                    title="No Drops Available"
+                    description="There are no claimable drop requests right now."
+                  />
                 </li>
               ) : null}
             </ul>
@@ -468,6 +472,7 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
 
           <article className="panel p-5">
             <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">Published Schedule</h2>
+            {showPublishedSkeleton ? <CardListSkeleton className="mt-3" count={3} showBadge={false} /> : null}
             <div className="mt-3 space-y-4">
               {publishedByLocation.map(([locationName, locationShifts]) => (
                 <div key={locationName}>
@@ -482,7 +487,10 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
                 </div>
               ))}
               {!loading && publishedByLocation.length === 0 ? (
-                <p className="text-sm text-slate-500">No published shifts visible for this week.</p>
+                <EmptyState
+                  title="No Published Schedule"
+                  description="No published shifts are visible for the selected week."
+                />
               ) : null}
             </div>
           </article>
@@ -504,7 +512,7 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
             </p>
 
             <div className="mt-4 space-y-3">
-              {swapSuggestionsLoading ? <p className="text-sm text-slate-500">Loading eligible staff...</p> : null}
+              {swapSuggestionsLoading ? <CardListSkeleton count={1} showBadge={false} /> : null}
               <label>
                 <span className="mb-1 block text-xs text-slate-500">Eligible staff suggestions</span>
                 <select
@@ -527,9 +535,10 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
                 </p>
               ) : null}
               {!swapSuggestionsLoading && swapSuggestions.length === 0 ? (
-                <p className="rounded-md border border-dashed border-slate-300 p-3 text-xs text-slate-600">
-                  No eligible staff suggestions were found for this shift right now.
-                </p>
+                <EmptyState
+                  title="No Eligible Suggestions"
+                  description="No eligible staff suggestions were found for this shift right now."
+                />
               ) : null}
               <label>
                 <span className="mb-1 block text-xs text-slate-500">Optional note</span>

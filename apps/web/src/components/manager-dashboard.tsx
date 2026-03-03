@@ -21,6 +21,9 @@ import {
 import { getToken } from '@/lib/api/auth';
 import { getSocket } from '@/lib/socket';
 import { NotificationCenter } from './notification-center';
+import { CardListSkeleton } from './skeleton/CardListSkeleton';
+import { EmptyState } from './state/EmptyState';
+import { ErrorState } from './state/ErrorState';
 
 const mondayIso = () => DateTime.now().startOf('week').toISODate() ?? DateTime.now().toISODate()!;
 const seventhDayOverrideCode = 'SEVENTH_CONSECUTIVE_DAY_REQUIRES_OVERRIDE';
@@ -209,6 +212,10 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
     Boolean(selectedStaffId);
   const canAssignNormally = Boolean(validation?.ok && selectedStaffId);
   const canAssign = !assigning && (canAssignNormally || canAssignWithOverride);
+  const showShiftsSkeleton = loading && shifts.length === 0;
+  const showSwapSkeleton = swapInboxLoading && swapInbox.length === 0;
+  const showShiftHistorySkeleton =
+    activeShiftPanel === 'history' && shiftAuditLoading && shiftAudit.length === 0;
 
   const loadShifts = useCallback(async () => {
     if (!locationId) {
@@ -521,17 +528,13 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
   };
 
   return (
-    <div className="space-y-6">
-      <header className="panel flex flex-col gap-4 p-5 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Shift Planning</p>
-          <h2 className="font-[family-name:var(--font-heading)] text-2xl font-semibold text-ink">
-            Weekly Assignment Control
-          </h2>
-          <p className="text-sm text-slate-600">Manage shifts, staffing rules, and approval workflows.</p>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
+    <div
+      className="space-y-6"
+      aria-busy={loading || swapInboxLoading || staffLoading || validating || shiftAuditLoading || assigning || undefined}
+    >
+      <header className="panel p-5">
+        <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Schedule Filters</p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <label>
             <span className="mb-1 block text-xs text-slate-500">Location</span>
             <select
@@ -567,6 +570,8 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
         </div>
       </header>
 
+      {error ? <ErrorState message={error} onRetry={() => void loadShifts()} /> : null}
+
       {realtimeBanner ? (
         <section
           className={`rounded-md border px-4 py-3 text-sm ${
@@ -590,9 +595,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
             </button>
           </div>
 
-          {loading ? <p className="text-sm text-slate-500">Loading shifts...</p> : null}
-          {error ? <p className="mb-3 text-sm text-red-600">{error}</p> : null}
-
+          {showShiftsSkeleton ? <CardListSkeleton count={4} /> : null}
           <ul className="space-y-3">
             {shifts.map((shift) => (
               <li
@@ -630,8 +633,8 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
             ))}
 
             {!loading && shifts.length === 0 ? (
-              <li className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-                No shifts found for the selected week.
+              <li>
+                <EmptyState title="No Shifts Found" description="No shifts were found for this location and week." />
               </li>
             ) : null}
           </ul>
@@ -642,7 +645,12 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
             <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">Shift Details</h2>
 
             {!selectedShift ? (
-              <p className="mt-2 text-sm text-slate-600">Select a shift to assign staff.</p>
+              <div className="mt-3">
+                <EmptyState
+                  title="No Shift Selected"
+                  description="Select a shift from the list to validate and assign staff."
+                />
+              </div>
             ) : (
               <div className="mt-3 space-y-4 text-sm">
                 <div>
@@ -824,8 +832,10 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                     >
                       Refresh History
                     </button>
-                    {shiftAuditLoading ? <p className="text-xs text-slate-500">Loading shift history...</p> : null}
-                    {shiftAuditError ? <p className="text-xs text-red-600">{shiftAuditError}</p> : null}
+                    {showShiftHistorySkeleton ? <CardListSkeleton count={3} showBadge={false} /> : null}
+                    {shiftAuditError ? (
+                      <ErrorState title="History Load Failed" message={shiftAuditError} onRetry={() => void loadShiftAudit()} />
+                    ) : null}
                     <ul className="space-y-2">
                       {shiftAudit.map((entry) => (
                         <li key={entry._id} className="rounded-md border border-slate-200 p-2 text-xs">
@@ -846,8 +856,11 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                         </li>
                       ))}
                       {!shiftAuditLoading && shiftAudit.length === 0 ? (
-                        <li className="rounded-md border border-dashed border-slate-300 p-2 text-xs text-slate-500">
-                          No history entries found for this shift.
+                        <li>
+                          <EmptyState
+                            title="No History Entries"
+                            description="No audit history entries were found for this shift yet."
+                          />
                         </li>
                       ) : null}
                     </ul>
@@ -867,7 +880,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
             {swapInboxMessage ? (
               <p className="mt-3 rounded-md bg-green-100 p-2 text-xs text-green-700">{swapInboxMessage}</p>
             ) : null}
-            {swapInboxLoading ? <p className="mt-3 text-sm text-slate-500">Loading requests...</p> : null}
+            {showSwapSkeleton ? <CardListSkeleton className="mt-3" count={3} /> : null}
             <ul className="mt-3 space-y-3">
               {swapInbox.map((request) => (
                 <li key={request._id} className="rounded-md border border-slate-200 p-3">
@@ -913,8 +926,11 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                 </li>
               ))}
               {!swapInboxLoading && swapInbox.length === 0 ? (
-                <li className="rounded-md border border-dashed border-slate-300 p-3 text-xs text-slate-500">
-                  No pending coverage approvals for this location.
+                <li>
+                  <EmptyState
+                    title="No Coverage Requests"
+                    description="There are no pending swap or drop approvals for this location."
+                  />
                 </li>
               ) : null}
             </ul>

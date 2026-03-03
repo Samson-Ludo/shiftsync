@@ -307,6 +307,24 @@ Behavior highlights:
   - disconnect Socket.IO client
   - redirect to `/login`
 
+## Loading States
+
+- Skeleton system lives in `apps/web/src/components/skeleton`:
+  - `Skeleton.tsx`: base pulse block
+  - `PageSkeleton.tsx`: full page-level loading scaffold (supports auth/loading shell with sidebar)
+  - `TableSkeleton.tsx`: tabular report placeholders
+  - `CardListSkeleton.tsx`: card/list placeholders for shifts, inboxes, and notifications
+  - `SidebarSkeleton.tsx`: placeholder sidebar used during auth/user bootstrap
+- Shared state components live in `apps/web/src/components/state`:
+  - `EmptyState.tsx`
+  - `ErrorState.tsx`
+- Pattern for protected pages:
+  - auth loading: render `PageSkeleton` with `withLayout`
+  - data loading: render page-specific skeletons (`TableSkeleton` or `CardListSkeleton`)
+  - errors: render `ErrorState` with optional retry action
+  - empty results: render `EmptyState`
+- `AppLayout` supports consistent page title/subtitle, spacing, and `aria-busy` for loading accessibility.
+
 ## Assignment Concurrency Model
 
 Assignment creation now uses a lock + transaction + revalidation sequence to prevent race conditions:

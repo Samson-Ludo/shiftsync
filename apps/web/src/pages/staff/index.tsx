@@ -1,5 +1,6 @@
 import { StaffDashboard } from '@/components/staff-dashboard';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { PageSkeleton } from '@/components/skeleton/PageSkeleton';
 import { UserRole } from '@/lib/api';
 import { useRequireAuth } from '@/lib/auth/useRequireAuth';
 
@@ -9,17 +10,15 @@ export default function StaffPage() {
   const { user, loading } = useRequireAuth({ allowedRoles: staffRoles });
 
   if (loading || !user) {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-3xl items-center justify-center p-6">
-        <section className="panel w-full p-8 text-center">
-          <p className="text-sm text-slate-600">Loading staff workspace...</p>
-        </section>
-      </main>
-    );
+    return <PageSkeleton withLayout showToolbar sectionCount={3} />;
   }
 
   return (
-    <AppLayout user={user}>
+    <AppLayout
+      user={user}
+      title="My Shifts"
+      subtitle="Track assignments, request swaps, and claim available coverage."
+    >
       <StaffDashboard user={user} />
     </AppLayout>
   );

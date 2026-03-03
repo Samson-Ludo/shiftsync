@@ -1,4 +1,4 @@
-import { PropsWithChildren, useCallback, useEffect, useMemo, useState } from 'react';
+import { PropsWithChildren, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { Menu } from 'lucide-react';
 import { CurrentUser } from '@/lib/api';
@@ -9,11 +9,15 @@ import { getPageTitle } from '@/components/navigation/nav-config';
 
 type AppLayoutProps = PropsWithChildren<{
   user: CurrentUser;
+  title?: string;
+  subtitle?: string;
+  actions?: ReactNode;
+  ariaBusy?: boolean;
 }>;
 
 const roleLabel = (role: CurrentUser['role']): string => role.charAt(0).toUpperCase() + role.slice(1);
 
-export function AppLayout({ user, children }: AppLayoutProps) {
+export function AppLayout({ user, title, subtitle, actions, ariaBusy = false, children }: AppLayoutProps) {
   const router = useRouter();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
@@ -21,10 +25,12 @@ export function AppLayout({ user, children }: AppLayoutProps) {
     setIsMobileSidebarOpen(false);
   }, [router.asPath]);
 
-  const pageTitle = useMemo(
-    () => getPageTitle(user.role, router.pathname, router.asPath),
-    [router.asPath, router.pathname, user.role],
-  );
+  const pageTitle = useMemo(() => title ?? getPageTitle(user.role, router.pathname, router.asPath), [
+    router.asPath,
+    router.pathname,
+    title,
+    user.role,
+  ]);
 
   const handleLogout = useCallback(() => {
     clearToken();
@@ -44,8 +50,8 @@ export function AppLayout({ user, children }: AppLayoutProps) {
 
         <div className="flex min-h-screen min-w-0 flex-1 flex-col">
           <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 shadow-sm backdrop-blur">
-            <div className="flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
-              <div className="flex items-center gap-3">
+            <div className="flex min-h-16 flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+              <div className="flex min-w-0 items-center gap-3">
                 <button
                   type="button"
                   aria-label="Open navigation"
@@ -54,24 +60,28 @@ export function AppLayout({ user, children }: AppLayoutProps) {
                 >
                   <Menu className="h-4 w-4" />
                 </button>
-                <div>
+                <div className="min-w-0">
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Workspace</p>
-                  <h1 className="font-[family-name:var(--font-heading)] text-lg font-semibold text-ink">
+                  <h1 className="truncate font-[family-name:var(--font-heading)] text-lg font-semibold text-ink">
                     {pageTitle}
                   </h1>
+                  {subtitle ? <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p> : null}
                 </div>
               </div>
 
-              <div className="text-right">
-                <p className="truncate text-sm font-semibold text-slate-800">
-                  {user.firstName} {user.lastName}
-                </p>
-                <p className="text-xs text-slate-500">{roleLabel(user.role)}</p>
+              <div className="ml-auto flex items-center gap-3">
+                {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+                <div className="text-right">
+                  <p className="truncate text-sm font-semibold text-slate-800">
+                    {user.firstName} {user.lastName}
+                  </p>
+                  <p className="text-xs text-slate-500">{roleLabel(user.role)}</p>
+                </div>
               </div>
             </div>
           </header>
 
-          <main className="min-w-0 flex-1">
+          <main className="min-w-0 flex-1" aria-busy={ariaBusy || undefined}>
             <div className="mx-auto w-full max-w-7xl p-4 sm:p-6 lg:p-8">{children}</div>
           </main>
         </div>

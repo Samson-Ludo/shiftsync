@@ -8,6 +8,8 @@ import {
 } from '@/lib/api';
 import { getToken } from '@/lib/api/auth';
 import { getSocket } from '@/lib/socket';
+import { CardListSkeleton } from '@/components/skeleton/CardListSkeleton';
+import { EmptyState } from '@/components/state/EmptyState';
 
 type NotificationCenterProps = {
   mode?: 'compact' | 'full';
@@ -120,7 +122,7 @@ export function NotificationCenter({
   }, [fetchNotifications]);
 
   return (
-    <section className="panel p-5">
+    <section className="panel p-5" aria-busy={loading || undefined}>
       <div className="flex items-center justify-between">
         <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">Notifications</h2>
         <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600">
@@ -161,39 +163,44 @@ export function NotificationCenter({
         </div>
       ) : null}
 
-      <ul className="mt-3 space-y-2">
-        {loading ? <li className="text-sm text-slate-500">Loading notifications...</li> : null}
-        {notifications.map((notification) => (
-          <li key={notification._id} className="rounded-md border border-slate-200 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium">{notification.title}</p>
-              {!notification.read ? (
-                <button
-                  className="rounded border border-slate-300 px-2 py-1 text-xs"
-                  onClick={() => void markRead(notification._id)}
-                >
-                  Mark read
-                </button>
-              ) : (
-                <span className="text-xs text-slate-500">Read</span>
-              )}
-            </div>
-            <p className="mt-1 text-sm text-slate-600">{notification.body}</p>
-            {readEmailSimulated(notification.metadata) !== null ? (
-              <p className="mt-1 text-xs text-slate-500">
-                {readEmailSimulated(notification.metadata)
-                  ? 'Email simulation attached'
-                  : 'In-app delivery only'}
-              </p>
-            ) : null}
-          </li>
-        ))}
-        {!loading && notifications.length === 0 ? (
-          <li className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-            No notifications yet.
-          </li>
-        ) : null}
-      </ul>
+      {loading ? (
+        <div className="mt-3">
+          <CardListSkeleton count={mode === 'full' ? 4 : 3} showBadge={false} />
+        </div>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {notifications.map((notification) => (
+            <li key={notification._id} className="rounded-md border border-slate-200 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium">{notification.title}</p>
+                {!notification.read ? (
+                  <button
+                    className="rounded border border-slate-300 px-2 py-1 text-xs"
+                    onClick={() => void markRead(notification._id)}
+                  >
+                    Mark read
+                  </button>
+                ) : (
+                  <span className="text-xs text-slate-500">Read</span>
+                )}
+              </div>
+              <p className="mt-1 text-sm text-slate-600">{notification.body}</p>
+              {readEmailSimulated(notification.metadata) !== null ? (
+                <p className="mt-1 text-xs text-slate-500">
+                  {readEmailSimulated(notification.metadata)
+                    ? 'Email simulation attached'
+                    : 'In-app delivery only'}
+                </p>
+              ) : null}
+            </li>
+          ))}
+          {notifications.length === 0 ? (
+            <li>
+              <EmptyState title="No Notifications Yet" description="New alerts will appear here in real time." />
+            </li>
+          ) : null}
+        </ul>
+      )}
 
       {mode === 'full' ? (
         <div className="mt-4 flex items-center justify-between text-xs text-slate-500">

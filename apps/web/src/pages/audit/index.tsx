@@ -9,6 +9,10 @@ import {
 } from '@/lib/api';
 import { useRequireAuth } from '@/lib/auth/useRequireAuth';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { PageSkeleton } from '@/components/skeleton/PageSkeleton';
+import { TableSkeleton } from '@/components/skeleton/TableSkeleton';
+import { EmptyState } from '@/components/state/EmptyState';
+import { ErrorState } from '@/components/state/ErrorState';
 
 const adminRoles: UserRole[] = ['admin'];
 const defaultStartDate = () => DateTime.now().minus({ days: 7 }).toISODate() ?? DateTime.now().toISODate()!;
@@ -108,24 +112,19 @@ export default function AuditLogsPage() {
   };
 
   if (loading || !user) {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-3xl items-center justify-center p-6">
-        <section className="panel w-full p-8 text-center">
-          <p className="text-sm text-slate-600">Loading audit logs...</p>
-        </section>
-      </main>
-    );
+    return <PageSkeleton withLayout showToolbar content={<TableSkeleton rows={7} columns={5} />} />;
   }
 
   return (
-    <AppLayout user={user}>
+    <AppLayout
+      user={user}
+      title="Audit Logs"
+      subtitle="Review and export schedule change history."
+      ariaBusy={loadingState}
+    >
       <div className="space-y-4">
         <section className="panel p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Admin Export</p>
-              <h2 className="font-[family-name:var(--font-heading)] text-xl font-semibold text-ink">Audit Logs</h2>
-            </div>
+          <div className="flex flex-wrap items-center justify-end gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -168,7 +167,7 @@ export default function AuditLogsPage() {
             </label>
           </div>
 
-          {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+          {error ? <ErrorState className="mt-3" message={error} onRetry={() => void loadAudit()} /> : null}
           {report ? (
             <p className="mt-3 text-xs text-slate-600">
               Showing <span className="font-semibold">{report.count}</span> records from {startDate} to {endDate}.
@@ -177,43 +176,59 @@ export default function AuditLogsPage() {
         </section>
 
         <section className="panel overflow-hidden p-0">
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
-                  <th className="px-3 py-2">Timestamp</th>
-                  <th className="px-3 py-2">Actor</th>
-                  <th className="px-3 py-2">Action</th>
-                  <th className="px-3 py-2">Entity</th>
-                  <th className="px-3 py-2">Change</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report?.logs.map((log) => (
-                  <tr key={log.id} className="border-b border-slate-100 align-top">
-                    <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-600">{new Date(log.createdAt).toLocaleString()}</td>
-                    <td className="px-3 py-2 text-xs text-slate-700">{log.actorName ?? log.actorId}</td>
-                    <td className="px-3 py-2 text-xs text-slate-700">{log.action}</td>
-                    <td className="px-3 py-2 text-xs text-slate-700">
-                      {log.entityType} ({log.entityId})
-                    </td>
-                    <td className="px-3 py-2 text-xs text-slate-600">
-                      <details>
-                        <summary className="cursor-pointer text-slate-700">View snapshots</summary>
-                        <pre className="mt-2 max-h-40 overflow-auto rounded bg-slate-50 p-2 text-[11px]">
-                          before: {JSON.stringify(log.beforeSnapshot)}
-                          {'\n'}after: {JSON.stringify(log.afterSnapshot)}
-                        </pre>
-                      </details>
-                    </td>
+          {loadingState && !report && !error ? <TableSkeleton rows={7} columns={5} className="border-none shadow-none" /> : null}
+          {report ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th className="px-3 py-2">Timestamp</th>
+                    <th className="px-3 py-2">Actor</th>
+                    <th className="px-3 py-2">Action</th>
+                    <th className="px-3 py-2">Entity</th>
+                    <th className="px-3 py-2">Change</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {report.logs.map((log) => (
+                    <tr key={log.id} className="border-b border-slate-100 align-top">
+                      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-600">
+                        {new Date(log.createdAt).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-700">{log.actorName ?? log.actorId}</td>
+                      <td className="px-3 py-2 text-xs text-slate-700">{log.action}</td>
+                      <td className="px-3 py-2 text-xs text-slate-700">
+                        {log.entityType} ({log.entityId})
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-600">
+                        <details>
+                          <summary className="cursor-pointer text-slate-700">View snapshots</summary>
+                          <pre className="mt-2 max-h-40 overflow-auto rounded bg-slate-50 p-2 text-[11px]">
+                            before: {JSON.stringify(log.beforeSnapshot)}
+                            {'\n'}after: {JSON.stringify(log.afterSnapshot)}
+                          </pre>
+                        </details>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
 
           {!loadingState && report && report.logs.length === 0 ? (
-            <p className="p-4 text-sm text-slate-500">No audit logs found for this range.</p>
+            <EmptyState
+              className="m-4"
+              title="No Audit Events"
+              description="No audit logs were found for this date range and location filter."
+            />
+          ) : null}
+          {!report && !loadingState && !error ? (
+            <EmptyState
+              className="m-4"
+              title="Set Filters to View Logs"
+              description="Choose a date range and optional location to load audit records."
+            />
           ) : null}
         </section>
       </div>

@@ -5,6 +5,10 @@ import { getToken } from '@/lib/api/auth';
 import { useRequireAuth } from '@/lib/auth/useRequireAuth';
 import { getSocket } from '@/lib/socket';
 import { AppLayout } from '@/components/layout/AppLayout';
+import { CardListSkeleton } from '@/components/skeleton/CardListSkeleton';
+import { PageSkeleton } from '@/components/skeleton/PageSkeleton';
+import { EmptyState } from '@/components/state/EmptyState';
+import { ErrorState } from '@/components/state/ErrorState';
 
 const allowedRoles: UserRole[] = ['admin', 'manager'];
 
@@ -80,68 +84,62 @@ export default function OnDutyPage() {
   }, [locationId, loadOnDuty]);
 
   if (loading || !user) {
-    return (
-      <main className="mx-auto flex min-h-screen max-w-3xl items-center justify-center p-6">
-        <section className="panel w-full p-8 text-center">
-          <p className="text-sm text-slate-600">Loading on-duty dashboard...</p>
-        </section>
-      </main>
-    );
+    return <PageSkeleton withLayout showToolbar content={<CardListSkeleton count={4} />} />;
   }
 
   return (
-    <AppLayout user={user}>
+    <AppLayout
+      user={user}
+      title="On-Duty"
+      subtitle="Live view of clocked-in staff by location."
+      ariaBusy={loadingState}
+    >
       <div className="space-y-4">
-      <header className="panel flex flex-wrap items-center justify-between gap-3 p-5">
-        <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">On-Duty Dashboard</p>
-          <h1 className="font-[family-name:var(--font-heading)] text-2xl font-semibold text-ink">
-            Live Clocked-In Staff
-          </h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <label>
-            <span className="mr-2 text-xs text-slate-500">Location</span>
-            <select
-              className="input min-w-48"
-              value={locationId}
-              onChange={(event) => setLocationId(event.target.value)}
-            >
-              {locations.map((location) => (
-                <option key={location._id} value={location._id}>
-                  {location.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </header>
+        <section className="panel p-5">
+          <div className="flex items-center gap-2">
+            <label>
+              <span className="mr-2 text-xs text-slate-500">Location</span>
+              <select
+                className="input min-w-48"
+                value={locationId}
+                onChange={(event) => setLocationId(event.target.value)}
+              >
+                {locations.map((location) => (
+                  <option key={location._id} value={location._id}>
+                    {location.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </section>
 
-      <section className="panel p-5">
-        {loadingState ? <p className="text-sm text-slate-500">Loading on-duty staff...</p> : null}
-        {error ? <p className="text-sm text-red-600">{error}</p> : null}
+        <section className="panel p-5">
+          {error ? <ErrorState message={error} onRetry={() => void loadOnDuty()} /> : null}
+          {loadingState && onDuty.length === 0 && !error ? <CardListSkeleton count={4} /> : null}
 
-        {!loadingState && onDuty.length === 0 ? (
-          <p className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-            No staff currently clocked in for this location.
-          </p>
-        ) : null}
+          {!loadingState && onDuty.length === 0 && !error ? (
+            <EmptyState
+              title="No One On Duty"
+              description="No staff members are currently clocked in for this location."
+            />
+          ) : null}
 
-        <ul className="space-y-3">
-          {onDuty.map((entry) => (
-            <li key={`${entry.shiftId}:${entry.staffId}`} className="rounded-md border border-slate-200 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="font-medium">{entry.staffName}</p>
-                <p className="text-xs text-slate-500">Clocked in: {formatUtc(entry.clockedInAtUtc)} UTC</p>
-              </div>
-              <p className="mt-1 text-sm text-slate-600">
-                {entry.shiftTitle} - {entry.localDate} {entry.startLocalTime}-{entry.endLocalTime} ({entry.timezone})
-              </p>
-              <p className="text-xs text-slate-500">{entry.staffEmail}</p>
-            </li>
-          ))}
-        </ul>
-      </section>
+          <ul className="space-y-3">
+            {onDuty.map((entry) => (
+              <li key={`${entry.shiftId}:${entry.staffId}`} className="rounded-md border border-slate-200 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium">{entry.staffName}</p>
+                  <p className="text-xs text-slate-500">Clocked in: {formatUtc(entry.clockedInAtUtc)} UTC</p>
+                </div>
+                <p className="mt-1 text-sm text-slate-600">
+                  {entry.shiftTitle} - {entry.localDate} {entry.startLocalTime}-{entry.endLocalTime} ({entry.timezone})
+                </p>
+                <p className="text-xs text-slate-500">{entry.staffEmail}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
       </div>
     </AppLayout>
   );
