@@ -19,6 +19,7 @@ import {
   MeResponse,
   NotificationResponse,
   OnDutyResponse,
+  OvertimeReportResponse,
   PublishShiftResponse,
   ShiftMutationResponse,
   SwapRequestResponse,
@@ -225,6 +226,16 @@ export const updateNotificationPreference = async (
 
 export const getOnDuty = async (locationId: string): Promise<OnDutyResponse> => {
   const { data } = await api.get<OnDutyResponse>('/on-duty', { params: { locationId } });
+  return data;
+};
+
+export const getOvertimeReport = async (
+  locationId: string,
+  weekStart: string,
+): Promise<OvertimeReportResponse> => {
+  const { data } = await api.get<OvertimeReportResponse>('/reports/overtime', {
+    params: { locationId, weekStart },
+  });
   return data;
 };
 

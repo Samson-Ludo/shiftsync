@@ -28,6 +28,7 @@ type StaffSeed = {
   lastName: string;
   email: string;
   maxHoursPerWeek: number;
+  hourlyRate: number;
   certifications: string[];
   skills: string[];
 };
@@ -55,6 +56,7 @@ const staffSeedData: StaffSeed[] = [
     lastName: 'Ramirez',
     email: 'ava.staff@coastaleats.com',
     maxHoursPerWeek: 40,
+    hourlyRate: 23.5,
     certifications: ['NYC_MID', 'NYC_BRK'],
     skills: ['line_cook', 'closing'],
   },
@@ -63,6 +65,7 @@ const staffSeedData: StaffSeed[] = [
     lastName: 'Kim',
     email: 'noah.staff@coastaleats.com',
     maxHoursPerWeek: 35,
+    hourlyRate: 19.25,
     certifications: ['LA_PIER'],
     skills: ['cashier', 'opening'],
   },
@@ -71,6 +74,7 @@ const staffSeedData: StaffSeed[] = [
     lastName: 'Patel',
     email: 'mia.staff@coastaleats.com',
     maxHoursPerWeek: 32,
+    hourlyRate: 21.75,
     certifications: ['LA_DT', 'LA_PIER'],
     skills: ['barista', 'server'],
   },
@@ -79,6 +83,7 @@ const staffSeedData: StaffSeed[] = [
     lastName: 'Lopez',
     email: 'ethan.staff@coastaleats.com',
     maxHoursPerWeek: 38,
+    hourlyRate: 24.1,
     certifications: ['NYC_MID'],
     skills: ['prep', 'line_cook'],
   },
@@ -87,6 +92,7 @@ const staffSeedData: StaffSeed[] = [
     lastName: 'Chen',
     email: 'olivia.staff@coastaleats.com',
     maxHoursPerWeek: 30,
+    hourlyRate: 18.8,
     certifications: ['NYC_BRK'],
     skills: ['host', 'server'],
   },
@@ -95,6 +101,7 @@ const staffSeedData: StaffSeed[] = [
     lastName: 'Wright',
     email: 'liam.staff@coastaleats.com',
     maxHoursPerWeek: 36,
+    hourlyRate: 22.4,
     certifications: ['LA_DT'],
     skills: ['line_cook', 'prep'],
   },
@@ -103,6 +110,7 @@ const staffSeedData: StaffSeed[] = [
     lastName: 'Garcia',
     email: 'sophia.staff@coastaleats.com',
     maxHoursPerWeek: 34,
+    hourlyRate: 20.9,
     certifications: ['NYC_MID', 'LA_DT'],
     skills: ['cashier', 'expo'],
   },
@@ -111,6 +119,7 @@ const staffSeedData: StaffSeed[] = [
     lastName: 'Reed',
     email: 'mason.staff@coastaleats.com',
     maxHoursPerWeek: 40,
+    hourlyRate: 19.9,
     certifications: ['LA_PIER', 'LA_DT'],
     skills: ['closing', 'dish'],
   },
@@ -119,6 +128,7 @@ const staffSeedData: StaffSeed[] = [
     lastName: 'Scott',
     email: 'isabella.staff@coastaleats.com',
     maxHoursPerWeek: 28,
+    hourlyRate: 21.1,
     certifications: ['NYC_BRK', 'NYC_MID'],
     skills: ['server', 'barista'],
   },
@@ -127,6 +137,7 @@ const staffSeedData: StaffSeed[] = [
     lastName: 'Torres',
     email: 'james.staff@coastaleats.com',
     maxHoursPerWeek: 40,
+    hourlyRate: 22.95,
     certifications: ['LA_PIER'],
     skills: ['prep', 'opening'],
   },
@@ -135,6 +146,7 @@ const staffSeedData: StaffSeed[] = [
     lastName: 'Hill',
     email: 'charlotte.staff@coastaleats.com',
     maxHoursPerWeek: 26,
+    hourlyRate: 18.35,
     certifications: ['NYC_BRK'],
     skills: ['host', 'cashier'],
   },
@@ -143,6 +155,7 @@ const staffSeedData: StaffSeed[] = [
     lastName: 'Price',
     email: 'benjamin.staff@coastaleats.com',
     maxHoursPerWeek: 37,
+    hourlyRate: 24.5,
     certifications: ['LA_DT', 'NYC_MID'],
     skills: ['line_cook', 'expo'],
   },
@@ -275,6 +288,7 @@ const seed = async () => {
     staffUsers.map((user, index) => ({
       userId: user._id,
       maxHoursPerWeek: staffSeedData[index].maxHoursPerWeek,
+      hourlyRate: staffSeedData[index].hourlyRate,
       notes: `Primary skills: ${staffSeedData[index].skills.join(', ')}`,
     })),
   );

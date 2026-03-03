@@ -5,6 +5,7 @@ export interface ShiftAssignmentDoc {
   staffId: Types.ObjectId;
   assignedBy: Types.ObjectId;
   status: 'assigned' | 'removed';
+  overrideReason?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -15,6 +16,7 @@ const shiftAssignmentSchema = new Schema<ShiftAssignmentDoc>(
     staffId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     assignedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     status: { type: String, enum: ['assigned', 'removed'], default: 'assigned' },
+    overrideReason: { type: String },
   },
   { timestamps: true },
 );

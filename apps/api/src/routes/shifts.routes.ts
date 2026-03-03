@@ -6,6 +6,7 @@ import { authenticateJwt, AuthenticatedRequest } from '../middleware/auth.js';
 import { requireRoles } from '../middleware/rbac.js';
 import { validateRequest } from '../middleware/validate.js';
 import {
+  AuditLogModel,
   ClockEventModel,
   LocationModel,
   StaffCertificationModel,
@@ -78,7 +79,15 @@ const shiftIdSchema = z.object({
 const assignShiftSchema = z.object({
   query: z.object({}).optional().default({}),
   params: z.object({ id: z.string().min(1) }),
-  body: z.object({ staffId: z.string().min(1) }),
+  body: z.object({
+    staffId: z.string().min(1),
+    override: z
+      .object({
+        allowSeventhDay: z.literal(true),
+        reason: z.string().min(1).max(500),
+      })
+      .optional(),
+  }),
 });
 
 const validateAssignSchema = z.object({
@@ -801,6 +810,16 @@ shiftsRouter.post(
     const shiftObjectId = parseObjectId(req.params.id);
     const staffIdRaw = getSingleValue(req.body.staffId);
     const staffObjectId = parseObjectId(staffIdRaw);
+    const overridePayload =
+      req.body.override && typeof req.body.override === 'object'
+        ? {
+            allowSeventhDay: req.body.override.allowSeventhDay === true,
+            reason:
+              typeof req.body.override.reason === 'string'
+                ? req.body.override.reason.trim()
+                : '',
+          }
+        : undefined;
 
     if (!shiftObjectId || !staffObjectId) {
       res.status(400).json({ message: 'Invalid shiftId or staffId' });
@@ -829,6 +848,7 @@ shiftsRouter.post(
             staffId: Types.ObjectId;
             assignedBy: Types.ObjectId;
             status: string;
+            overrideReason?: string;
           };
         }
       | null = null;
@@ -865,6 +885,12 @@ shiftsRouter.post(
         ok: false,
         violations: [],
         suggestions: [],
+        complianceImpact: {
+          projectedWeeklyHours: 0,
+          projectedDailyHours: 0,
+          consecutiveDaysAfterAssignment: 0,
+          warnings: [],
+        },
       };
 
       session.startTransaction();
@@ -901,6 +927,7 @@ shiftsRouter.post(
           shiftId: shiftObjectId.toString(),
           staffId: staffObjectId.toString(),
           actorId: user.userId,
+          override: overridePayload,
           session,
         });
 
@@ -915,6 +942,9 @@ shiftsRouter.post(
               staffId: staffObjectId,
               assignedBy: new Types.ObjectId(user.userId),
               status: 'assigned',
+              ...(overridePayload?.allowSeventhDay && overridePayload.reason
+                ? { overrideReason: overridePayload.reason }
+                : {}),
             },
           ],
           { session },
@@ -939,12 +969,34 @@ shiftsRouter.post(
               metadata: {
                 shiftId: shift._id.toString(),
                 staffId: staffObjectId.toString(),
+                ...(overridePayload?.allowSeventhDay && overridePayload.reason
+                  ? { overrideReason: overridePayload.reason }
+                  : {}),
               },
             },
           ],
           session,
           simulateEmailAsync: false,
         });
+
+        if (overridePayload?.allowSeventhDay && overridePayload.reason) {
+          await AuditLogModel.create(
+            [
+              {
+                actorUserId: new Types.ObjectId(user.userId),
+                action: 'assignment_override_seventh_day',
+                entityType: 'shift_assignment',
+                entityId: createdAssignments[0]._id.toString(),
+                payload: {
+                  shiftId: shiftObjectId.toString(),
+                  staffId: staffObjectId.toString(),
+                  reason: overridePayload.reason,
+                },
+              },
+            ],
+            { session },
+          );
+        }
 
         persistedAssignment = {
           shift: {
@@ -965,6 +1017,7 @@ shiftsRouter.post(
             staffId: assignment.staffId,
             assignedBy: assignment.assignedBy,
             status: assignment.status,
+            overrideReason: assignment.overrideReason,
           },
         };
 
@@ -1007,7 +1060,7 @@ shiftsRouter.post(
 
       res.status(201).json({
         assignment: persistedAssignment.assignment,
-        validation: { ok: true, violations: [], suggestions: [] },
+        validation: txValidation,
       });
     } catch (error: unknown) {
       if (error instanceof RouteHttpError) {

@@ -83,6 +83,7 @@ Seed script (`apps/api/src/seed.ts`) provides:
 - 4 locations across 2 time zones (`America/Los_Angeles`, `America/New_York`)
 - 3 managers mapped to assigned locations
 - 12 staff with mixed skills and location certifications
+- Staff profiles with realistic hourly rates for overtime-cost projection
 - Recurring weekly availability rules + 4 one-off availability exceptions
 - Overnight shift: `23:00 -> 03:00` next day
 - Hour-risk arrangement: one staff assigned 48h + extra 4h shift available (52h risk)
@@ -106,6 +107,29 @@ Edge-case handling:
 - Staff may have at most 3 active requests (`pending`, `accepted`, `claimed`) at once.
 - Drop requests expire when shift start is within 24 hours or explicit `expiresAtUtc` is reached.
 - API runs an idempotent expiry worker every 3 minutes to enforce drop expiration.
+
+## Labor Compliance Rules
+
+Assignment validation now includes labor compliance what-if impact and policy checks:
+
+- Weekly hours: warning at `35+`
+- Weekly hours above `40`: warning only (decision: allow with warning, do not hard-block)
+- Daily hours above `8`: warning
+- Daily hours above `12`: hard block
+- 6th consecutive worked day (within the week): warning
+- 7th consecutive worked day: hard block unless manager override is supplied with reason
+
+Consecutive-day definition:
+
+- Any shift touching a local calendar day counts that day as worked.
+- For overnight shifts, each touched local calendar day is counted.
+
+Override behavior:
+
+- Assignment API accepts optional payload: `override: { allowSeventhDay: true, reason: string }`
+- Override reason is persisted on `ShiftAssignment.overrideReason`
+- Override event is written to `AuditLog`
+- Validator response always includes `complianceImpact` for what-if projection.
 
 ## Test Login Credentials
 
@@ -134,6 +158,7 @@ All seeded users use password: `Pass123!`
 - `POST /shifts/:id/clock-out`
 - `POST /shifts/:id/validate-assign/:staffId`
 - `DELETE /shifts/:id/assignments/:assignmentId`
+- `GET /reports/overtime?locationId&weekStart`
 - `GET /staff?locationId=<id>`
 - `GET /on-duty?locationId=<id>`
 - `GET /swap-requests?mine=true`
@@ -203,6 +228,7 @@ Conflict handling:
 - If lock acquisition fails, API returns `409` with `code: "conflict_detected"` and emits `conflict_detected` to manager room `user:{userId}`.
 - If revalidation fails inside transaction, API returns `409` with `code: "conflict_detected"` plus violations/suggestions, and emits `conflict_detected`.
 - On success, API emits `assignment_created` to `location:{locationId}` so managers refresh without full page reload.
+- 7th-day override assignment path persists manager reason in assignment + audit trail.
 
 ## RBAC Rules Implemented
 
@@ -242,7 +268,16 @@ Conflict handling:
 13. Shift edit cancellation edge case:
    - Create a pending swap/drop request.
    - Edit that shift as manager and confirm request auto-cancels with realtime + notification.
-14. Concurrency test (two manager windows):
+14. Compliance what-if + override scenario:
+   - In manager dashboard, choose a staff/shift pair that pushes weekly totals to 35+ / 40+ and confirm warnings appear before assignment.
+   - Choose a pairing that triggers 7th consecutive day, verify hard block + required override reason UI.
+   - Submit assignment with override and verify it succeeds only when reason is provided.
+15. Overtime report scenario:
+   - Open `/overtime`, select location + week, and verify:
+   - projected premium formula = `hoursOver40 * hourlyRate * 0.5`
+   - staff over 40h are highlighted
+   - assignment rows identify which shifts pushed overtime
+16. Concurrency test (two manager windows):
    - Open two browser windows and log in as managers who can access the same location.
    - Pick two different shifts and the same staff member.
    - Click **Confirm Assign** in both windows at nearly the same time.
@@ -272,7 +307,7 @@ npm run test:constraints -w apps/api
 
 ## Notes / TODOs
 
-- Assignment constraints now enforce overlap, minimum rest, required skill, certification, and availability windows.
-- Overtime cap and labor law policy checks remain TODO for a later iteration.
-- Swap/drop lifecycle now supports creation, accept/claim, manager approval/rejection, cancellation, expiry, and realtime notifications.
+- Assignment constraints enforce overlap, minimum rest, required skill, certification, availability, and labor compliance warnings/blocks.
+- Swap/drop lifecycle supports creation, accept/claim, manager approval/rejection, cancellation, expiry, and realtime notifications.
+- Overtime report includes premium-cost projection and overtime-driving assignment highlights.
 - No shared `packages/` types package added yet to keep MVP simple and avoid premature abstraction.

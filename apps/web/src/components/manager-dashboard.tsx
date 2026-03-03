@@ -6,8 +6,8 @@ import {
   AssignmentValidationResponse,
   CurrentUser,
   ShiftItem,
-  SwapRequestItem,
   StaffOption,
+  SwapRequestItem,
   approveSwapRequest,
   assignStaff,
   createShift as createShiftRequest,
@@ -22,6 +22,7 @@ import { getSocket } from '@/lib/socket';
 import { NotificationCenter } from './notification-center';
 
 const mondayIso = () => DateTime.now().startOf('week').toISODate() ?? DateTime.now().toISODate()!;
+const seventhDayOverrideCode = 'SEVENTH_CONSECUTIVE_DAY_REQUIRES_OVERRIDE';
 
 type CreateFormState = {
   title: string;
@@ -37,21 +38,12 @@ type RealtimeBanner = {
 } | null;
 
 type ConflictDetectedEvent = {
-  code?: string;
   message?: string;
-  shiftId?: string;
-  staffId?: string;
-  detectedAtUtc?: string;
 };
 
 type AssignmentCreatedEvent = {
-  assignmentId: string;
-  shiftId: string;
-  staffId: string;
+  locationId?: string;
   staffName?: string;
-  locationId: string;
-  assignedBy: string;
-  createdAtUtc: string;
 };
 
 type LocationEventPayload = {
@@ -66,10 +58,18 @@ const initialCreateForm: CreateFormState = {
   endLocalTime: '17:00',
 };
 
+const emptyComplianceImpact: AssignmentValidationResponse['complianceImpact'] = {
+  projectedWeeklyHours: 0,
+  projectedDailyHours: 0,
+  consecutiveDaysAfterAssignment: 0,
+  warnings: [],
+};
+
 const fallbackValidation: AssignmentValidationResponse = {
   ok: false,
   violations: [],
   suggestions: [],
+  complianceImpact: emptyComplianceImpact,
 };
 
 const toValidationResponse = (data: unknown): AssignmentValidationResponse | null => {
@@ -87,6 +87,26 @@ const toValidationResponse = (data: unknown): AssignmentValidationResponse | nul
     suggestions: Array.isArray(maybeValidation.suggestions)
       ? (maybeValidation.suggestions as AssignmentValidationResponse['suggestions'])
       : [],
+    complianceImpact:
+      maybeValidation.complianceImpact && typeof maybeValidation.complianceImpact === 'object'
+        ? {
+            projectedWeeklyHours:
+              typeof maybeValidation.complianceImpact.projectedWeeklyHours === 'number'
+                ? maybeValidation.complianceImpact.projectedWeeklyHours
+                : 0,
+            projectedDailyHours:
+              typeof maybeValidation.complianceImpact.projectedDailyHours === 'number'
+                ? maybeValidation.complianceImpact.projectedDailyHours
+                : 0,
+            consecutiveDaysAfterAssignment:
+              typeof maybeValidation.complianceImpact.consecutiveDaysAfterAssignment === 'number'
+                ? maybeValidation.complianceImpact.consecutiveDaysAfterAssignment
+                : 0,
+            warnings: Array.isArray(maybeValidation.complianceImpact.warnings)
+              ? maybeValidation.complianceImpact.warnings
+              : [],
+          }
+        : emptyComplianceImpact,
   };
 };
 
@@ -114,6 +134,18 @@ const swapStatusTone = (status: SwapRequestItem['status']): string => {
   return 'bg-amber-100 text-amber-700';
 };
 
+const complianceWarningTone = (code: string): string => {
+  if (code === 'WEEKLY_HOURS_OVER_40') {
+    return 'border-amber-300 bg-amber-50 text-amber-800';
+  }
+
+  if (code === 'SEVENTH_DAY_OVERRIDE_APPLIED') {
+    return 'border-blue-300 bg-blue-50 text-blue-800';
+  }
+
+  return 'border-yellow-300 bg-yellow-50 text-yellow-800';
+};
+
 export function ManagerDashboard({ user }: { user: CurrentUser }) {
   const locations = useMemo(() => user.managerLocations ?? [], [user.managerLocations]);
   const [locationId, setLocationId] = useState(locations[0]?._id ?? '');
@@ -122,6 +154,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
   const [staffOptions, setStaffOptions] = useState<StaffOption[]>([]);
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
   const [selectedStaffId, setSelectedStaffId] = useState<string>('');
+  const [overrideReason, setOverrideReason] = useState('');
   const [validation, setValidation] = useState<AssignmentValidationResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [staffLoading, setStaffLoading] = useState(false);
@@ -132,6 +165,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
   const [realtimeBanner, setRealtimeBanner] = useState<RealtimeBanner>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState<CreateFormState>(initialCreateForm);
+
   const [swapInbox, setSwapInbox] = useState<SwapRequestItem[]>([]);
   const [swapInboxLoading, setSwapInboxLoading] = useState(false);
   const [swapInboxMessage, setSwapInboxMessage] = useState<string | null>(null);
@@ -153,6 +187,24 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
     [staffOptions, selectedStaffId],
   );
 
+  const hardBlocks = useMemo(() => validation?.violations ?? [], [validation]);
+  const seventhDayBlock = useMemo(
+    () => hardBlocks.some((violation) => violation.code === seventhDayOverrideCode),
+    [hardBlocks],
+  );
+  const otherHardBlocks = useMemo(
+    () => hardBlocks.filter((violation) => violation.code !== seventhDayOverrideCode),
+    [hardBlocks],
+  );
+
+  const canAssignWithOverride =
+    seventhDayBlock &&
+    otherHardBlocks.length === 0 &&
+    overrideReason.trim().length > 0 &&
+    Boolean(selectedStaffId);
+  const canAssignNormally = Boolean(validation?.ok && selectedStaffId);
+  const canAssign = !assigning && (canAssignNormally || canAssignWithOverride);
+
   const loadShifts = useCallback(async () => {
     if (!locationId) {
       return;
@@ -164,7 +216,6 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
     try {
       const payload = await listShifts(locationId, weekStart);
       const nextShifts = payload.shifts ?? [];
-
       setShifts(nextShifts);
 
       if (nextShifts.length === 0) {
@@ -199,6 +250,10 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
   }, [locationId]);
 
   const loadSwapInbox = useCallback(async () => {
+    if (!locationId) {
+      return;
+    }
+
     setSwapInboxLoading(true);
 
     try {
@@ -292,6 +347,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
         tone: 'info',
         message: `Live update: ${payload.staffName ?? 'A staff member'} was assigned.`,
       });
+
       void loadShifts();
     };
 
@@ -362,10 +418,25 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
     setAssignmentMessage(null);
 
     try {
-      await assignStaff(selectedShiftId, selectedStaffId);
-      setValidation({ ok: true, violations: [], suggestions: [] });
-      setAssignmentMessage('Assignment saved successfully.');
+      const payload = await assignStaff(selectedShiftId, selectedStaffId, {
+        ...(canAssignWithOverride
+          ? {
+              override: {
+                allowSeventhDay: true,
+                reason: overrideReason.trim(),
+              },
+            }
+          : {}),
+      });
+
+      setValidation(payload.validation);
+      setAssignmentMessage(
+        canAssignWithOverride
+          ? 'Assignment saved with documented seventh-day override.'
+          : 'Assignment saved successfully.',
+      );
       setError(null);
+      setOverrideReason('');
       await loadShifts();
     } catch (assignError) {
       if (assignError instanceof ApiError && assignError.status === 409) {
@@ -424,12 +495,17 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
             {user.firstName} {user.lastName} ({user.role})
           </p>
         </div>
+
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-2 flex flex-wrap gap-2">
             <Link href="/on-duty" className="inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm">
               View On-Duty Dashboard
             </Link>
+            <Link href="/overtime" className="inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm">
+              View Overtime Dashboard
+            </Link>
           </div>
+
           <label>
             <span className="mb-1 block text-xs text-slate-500">Location</span>
             <select
@@ -439,6 +515,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                 setLocationId(event.target.value);
                 setSelectedStaffId('');
                 setValidation(null);
+                setOverrideReason('');
               }}
             >
               {locations.map((location) => (
@@ -448,6 +525,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
               ))}
             </select>
           </label>
+
           <label>
             <span className="mb-1 block text-xs text-slate-500">Week Start</span>
             <input
@@ -482,8 +560,10 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
               Create Shift
             </button>
           </div>
+
           {loading ? <p className="text-sm text-slate-500">Loading shifts...</p> : null}
           {error ? <p className="mb-3 text-sm text-red-600">{error}</p> : null}
+
           <ul className="space-y-3">
             {shifts.map((shift) => (
               <li
@@ -495,6 +575,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                   setSelectedShiftId(shift._id);
                   setValidation(null);
                   setAssignmentMessage(null);
+                  setOverrideReason('');
                 }}
               >
                 <div className="flex items-center justify-between">
@@ -515,6 +596,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                 </p>
               </li>
             ))}
+
             {!loading && shifts.length === 0 ? (
               <li className="rounded-md border border-dashed border-slate-300 p-4 text-sm text-slate-500">
                 No shifts found for the selected week.
@@ -526,6 +608,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
         <aside className="space-y-4">
           <section className="panel p-5">
             <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">Shift Details</h2>
+
             {!selectedShift ? (
               <p className="mt-2 text-sm text-slate-600">Select a shift to assign staff.</p>
             ) : (
@@ -550,6 +633,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                         setSelectedStaffId(event.target.value);
                         setValidation(null);
                         setAssignmentMessage(null);
+                        setOverrideReason('');
                       }}
                     >
                       <option value="">Select staff member...</option>
@@ -573,18 +657,66 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
 
                   {validation?.ok ? (
                     <p className="rounded-md bg-green-100 p-2 text-xs text-green-700">
-                      All constraints passed. You can assign this staff member.
+                      No hard blocks. You can assign this staff member.
                     </p>
                   ) : null}
 
-                  {!validation?.ok && validation?.violations?.length ? (
-                    <div className="rounded-md bg-red-50 p-2">
-                      <p className="mb-2 text-xs font-semibold text-red-700">Constraint violations</p>
+                  {hardBlocks.length > 0 ? (
+                    <div className="rounded-md border border-red-200 bg-red-50 p-2">
+                      <p className="mb-2 text-xs font-semibold text-red-700">Hard blocks</p>
                       <ul className="space-y-1 text-xs text-red-700">
-                        {validation.violations.map((violation, index) => (
+                        {hardBlocks.map((violation, index) => (
                           <li key={`${violation.code}-${index}`}>- {violation.message}</li>
                         ))}
                       </ul>
+                    </div>
+                  ) : null}
+
+                  {validation ? (
+                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-semibold text-slate-700">Compliance what-if impact</p>
+                      <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-700">
+                        <p>
+                          Weekly Hours: <span className="font-semibold">{validation.complianceImpact.projectedWeeklyHours}</span>
+                        </p>
+                        <p>
+                          Shift-Day Hours: <span className="font-semibold">{validation.complianceImpact.projectedDailyHours}</span>
+                        </p>
+                        <p>
+                          Consecutive Days: <span className="font-semibold">{validation.complianceImpact.consecutiveDaysAfterAssignment}</span>
+                        </p>
+                      </div>
+
+                      <div className="mt-2 space-y-2">
+                        {validation.complianceImpact.warnings.map((warning, index) => (
+                          <p
+                            key={`${warning.code}-${index}`}
+                            className={`rounded-md border p-2 text-xs ${complianceWarningTone(warning.code)}`}
+                          >
+                            {warning.message}
+                          </p>
+                        ))}
+                        {validation.complianceImpact.warnings.length === 0 ? (
+                          <p className="text-xs text-slate-500">No compliance warnings for this assignment.</p>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {seventhDayBlock && otherHardBlocks.length === 0 ? (
+                    <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
+                      <p className="text-xs font-semibold text-blue-800">
+                        Seventh consecutive day requires manager override.
+                      </p>
+                      <label className="mt-2 block">
+                        <span className="mb-1 block text-xs text-blue-700">Override reason (required)</span>
+                        <textarea
+                          className="input min-h-20 text-xs"
+                          value={overrideReason}
+                          onChange={(event) => setOverrideReason(event.target.value)}
+                          placeholder="Document why this 7th consecutive day assignment is allowed"
+                        />
+                      </label>
                     </div>
                   ) : null}
 
@@ -596,7 +728,10 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                           <button
                             key={suggestion.staffId}
                             className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-left text-xs hover:bg-slate-50"
-                            onClick={() => setSelectedStaffId(suggestion.staffId)}
+                            onClick={() => {
+                              setSelectedStaffId(suggestion.staffId);
+                              setOverrideReason('');
+                            }}
                           >
                             <span className="font-semibold">{suggestion.name}</span>
                             <span className="block text-slate-600">{suggestion.reason}</span>
@@ -611,12 +746,12 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                   ) : null}
                 </div>
 
-                <button
-                  className="btn-primary w-full"
-                  disabled={!validation?.ok || assigning || !selectedStaffId}
-                  onClick={() => void assignSelectedStaff()}
-                >
-                  {assigning ? 'Assigning...' : 'Confirm Assign'}
+                <button className="btn-primary w-full" disabled={!canAssign} onClick={() => void assignSelectedStaff()}>
+                  {assigning
+                    ? 'Assigning...'
+                    : canAssignWithOverride
+                      ? 'Confirm Assign with Override'
+                      : 'Confirm Assign'}
                 </button>
               </div>
             )}
@@ -684,6 +819,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
               ) : null}
             </ul>
           </section>
+
           <NotificationCenter />
         </aside>
       </section>

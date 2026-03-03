@@ -10,6 +10,18 @@ import {
   StaffSkillModel,
   UserModel,
 } from '../models/index.js';
+import {
+  DAILY_BLOCK_HOURS,
+  DAILY_WARNING_HOURS,
+  LaborComplianceImpact,
+  LaborComplianceWarning,
+  SEVENTH_DAY_OVERRIDE_REQUIRED,
+  SIXTH_DAY_WARNING,
+  WEEKLY_OVERTIME_HOURS,
+  WEEKLY_WARNING_HOURS,
+  computeConsecutiveDaysEndingOnDate,
+  computeLaborComplianceForWeek,
+} from './laborCompliance.js';
 
 const MIN_REST_HOURS = 10;
 const SUGGESTION_LIMIT = 5;
@@ -24,7 +36,9 @@ export type AssignmentViolation = {
     | 'REQUIRED_SKILL_MISSING'
     | 'AVAILABILITY_VIOLATION'
     | 'DOUBLE_BOOKING'
-    | 'MIN_REST_NOT_MET';
+    | 'MIN_REST_NOT_MET'
+    | 'DAILY_HOURS_EXCEEDS_12'
+    | 'SEVENTH_CONSECUTIVE_DAY_REQUIRES_OVERRIDE';
   message: string;
   details: Record<string, unknown>;
 };
@@ -39,12 +53,17 @@ export type ValidateAssignmentResult = {
   ok: boolean;
   violations: AssignmentViolation[];
   suggestions: AssignmentSuggestion[];
+  complianceImpact: LaborComplianceImpact;
 };
 
 type ValidateAssignmentInput = {
   shiftId: string;
   staffId: string;
   actorId: string;
+  override?: {
+    allowSeventhDay?: boolean;
+    reason?: string;
+  };
   session?: ClientSession;
 };
 
@@ -181,6 +200,158 @@ const listWeekdays = (dateIsos: string[], timezone: string): number[] => {
       dateIsos.map((dateIso) => DateTime.fromISO(dateIso, { zone: timezone }).weekday),
     ),
   );
+};
+
+const defaultComplianceImpact = (): LaborComplianceImpact => ({
+  projectedWeeklyHours: 0,
+  projectedDailyHours: 0,
+  consecutiveDaysAfterAssignment: 0,
+  warnings: [],
+});
+
+const buildComplianceWarnings = (args: {
+  projectedWeeklyHours: number;
+  projectedDailyHours: number;
+  consecutiveDaysAfterAssignment: number;
+  overrideApplied: boolean;
+}): LaborComplianceWarning[] => {
+  const warnings: LaborComplianceWarning[] = [];
+
+  if (args.projectedWeeklyHours >= WEEKLY_WARNING_HOURS) {
+    warnings.push({
+      code: 'WEEKLY_HOURS_35_PLUS',
+      message: `Projected weekly hours (${args.projectedWeeklyHours}) are at or above ${WEEKLY_WARNING_HOURS}.`,
+      details: {
+        threshold: WEEKLY_WARNING_HOURS,
+        projectedWeeklyHours: args.projectedWeeklyHours,
+      },
+    });
+  }
+
+  if (args.projectedWeeklyHours > WEEKLY_OVERTIME_HOURS) {
+    warnings.push({
+      code: 'WEEKLY_HOURS_OVER_40',
+      message: `Projected weekly hours (${args.projectedWeeklyHours}) exceed ${WEEKLY_OVERTIME_HOURS}.`,
+      details: {
+        threshold: WEEKLY_OVERTIME_HOURS,
+        projectedWeeklyHours: args.projectedWeeklyHours,
+      },
+    });
+  }
+
+  if (args.projectedDailyHours > DAILY_WARNING_HOURS) {
+    warnings.push({
+      code: 'DAILY_HOURS_OVER_8',
+      message: `Projected daily hours (${args.projectedDailyHours}) exceed ${DAILY_WARNING_HOURS}.`,
+      details: {
+        threshold: DAILY_WARNING_HOURS,
+        projectedDailyHours: args.projectedDailyHours,
+      },
+    });
+  }
+
+  if (args.consecutiveDaysAfterAssignment >= SIXTH_DAY_WARNING) {
+    warnings.push({
+      code: 'SIXTH_CONSECUTIVE_DAY',
+      message: `Assignment would place the staff on day ${args.consecutiveDaysAfterAssignment} of a consecutive stretch.`,
+      details: {
+        threshold: SIXTH_DAY_WARNING,
+        consecutiveDaysAfterAssignment: args.consecutiveDaysAfterAssignment,
+      },
+    });
+  }
+
+  if (args.overrideApplied) {
+    warnings.push({
+      code: 'SEVENTH_DAY_OVERRIDE_APPLIED',
+      message: 'Seventh consecutive day override is being applied for this assignment.',
+      details: {
+        threshold: SEVENTH_DAY_OVERRIDE_REQUIRED,
+        consecutiveDaysAfterAssignment: args.consecutiveDaysAfterAssignment,
+      },
+    });
+  }
+
+  return warnings;
+};
+
+const evaluateLaborCompliance = async (args: {
+  staffId: Types.ObjectId;
+  shift: {
+    timezone: string;
+    weekStartLocal: string;
+    localDate: string;
+    startAtUtc: string;
+    endAtUtc: string;
+  };
+  override?: {
+    allowSeventhDay?: boolean;
+    reason?: string;
+  };
+  session?: ClientSession;
+}): Promise<{ complianceImpact: LaborComplianceImpact; violations: AssignmentViolation[] }> => {
+  const snapshot = await computeLaborComplianceForWeek({
+    staffId: args.staffId,
+    weekStartLocal: args.shift.weekStartLocal,
+    timezone: args.shift.timezone,
+    includeShiftWindowUtc: {
+      startAtUtc: args.shift.startAtUtc,
+      endAtUtc: args.shift.endAtUtc,
+    },
+    session: args.session,
+  });
+
+  const projectedDailyHours = Number((snapshot.dailyTotals[args.shift.localDate] ?? 0).toFixed(2));
+  const workedDates = new Set(snapshot.workedDates);
+  const consecutiveDaysAfterAssignment = computeConsecutiveDaysEndingOnDate({
+    workedDates,
+    targetDateLocal: args.shift.localDate,
+    weekStartLocal: args.shift.weekStartLocal,
+    timezone: args.shift.timezone,
+  });
+
+  const overrideApplied = Boolean(args.override?.allowSeventhDay);
+  const complianceImpact: LaborComplianceImpact = {
+    projectedWeeklyHours: snapshot.totalWeeklyHours,
+    projectedDailyHours,
+    consecutiveDaysAfterAssignment,
+    warnings: buildComplianceWarnings({
+      projectedWeeklyHours: snapshot.totalWeeklyHours,
+      projectedDailyHours,
+      consecutiveDaysAfterAssignment,
+      overrideApplied,
+    }),
+  };
+
+  const violations: AssignmentViolation[] = [];
+
+  if (projectedDailyHours > DAILY_BLOCK_HOURS) {
+    violations.push({
+      code: 'DAILY_HOURS_EXCEEDS_12',
+      message: `Projected daily hours (${projectedDailyHours}) exceed hard limit of ${DAILY_BLOCK_HOURS}.`,
+      details: {
+        projectedDailyHours,
+        hardLimit: DAILY_BLOCK_HOURS,
+      },
+    });
+  }
+
+  if (consecutiveDaysAfterAssignment >= SEVENTH_DAY_OVERRIDE_REQUIRED) {
+    const reason = args.override?.reason?.trim() ?? '';
+    if (!args.override?.allowSeventhDay || reason.length === 0) {
+      violations.push({
+        code: 'SEVENTH_CONSECUTIVE_DAY_REQUIRES_OVERRIDE',
+        message:
+          'Assigning a 7th consecutive day requires an explicit manager override with a documented reason.',
+        details: {
+          consecutiveDaysAfterAssignment,
+          threshold: SEVENTH_DAY_OVERRIDE_REQUIRED,
+        },
+      });
+    }
+  }
+
+  return { complianceImpact, violations };
 };
 
 export const hasOverlap = (
@@ -431,14 +602,20 @@ const evaluateStaffAgainstShift = async (args: {
     _id: Types.ObjectId;
     locationId: Types.ObjectId;
     timezone: string;
+    weekStartLocal: string;
+    localDate: string;
     startAtUtc: string;
     endAtUtc: string;
     title: string;
     requiredSkill?: string;
   };
   locationCode: string;
+  override?: {
+    allowSeventhDay?: boolean;
+    reason?: string;
+  };
   session?: ClientSession;
-}): Promise<AssignmentViolation[]> => {
+}): Promise<{ violations: AssignmentViolation[]; complianceImpact: LaborComplianceImpact }> => {
   const violations: AssignmentViolation[] = [];
 
   const certificationQuery = StaffCertificationModel.exists({
@@ -520,7 +697,26 @@ const evaluateStaffAgainstShift = async (args: {
   );
 
   violations.push(...temporalViolations);
-  return violations;
+
+  const laborCompliance = await evaluateLaborCompliance({
+    staffId: args.staff._id,
+    shift: {
+      timezone: args.shift.timezone,
+      weekStartLocal: args.shift.weekStartLocal,
+      localDate: args.shift.localDate,
+      startAtUtc: args.shift.startAtUtc,
+      endAtUtc: args.shift.endAtUtc,
+    },
+    override: args.override,
+    session: args.session,
+  });
+
+  violations.push(...laborCompliance.violations);
+
+  return {
+    violations,
+    complianceImpact: laborCompliance.complianceImpact,
+  };
 };
 
 const getSuggestions = async (args: {
@@ -529,6 +725,8 @@ const getSuggestions = async (args: {
     _id: Types.ObjectId;
     locationId: Types.ObjectId;
     timezone: string;
+    weekStartLocal: string;
+    localDate: string;
     startAtUtc: string;
     endAtUtc: string;
     title: string;
@@ -553,7 +751,7 @@ const getSuggestions = async (args: {
   const suggestions: AssignmentSuggestion[] = [];
 
   for (const candidate of staffCandidates) {
-    const violations = await evaluateStaffAgainstShift({
+    const evaluation = await evaluateStaffAgainstShift({
       staff: {
         _id: candidate._id,
         firstName: candidate.firstName,
@@ -564,7 +762,7 @@ const getSuggestions = async (args: {
       session: args.session,
     });
 
-    if (violations.length === 0) {
+    if (evaluation.violations.length === 0) {
       const reasonParts = [
         `Certified for ${args.locationCode}`,
         args.shift.requiredSkill ? `has ${args.shift.requiredSkill}` : 'skill-compatible',
@@ -604,6 +802,7 @@ export async function validateAssignment(
         },
       ],
       suggestions: [],
+      complianceImpact: defaultComplianceImpact(),
     };
   }
 
@@ -611,7 +810,7 @@ export async function validateAssignment(
   const staffId = new Types.ObjectId(input.staffId);
 
   const shiftQuery = ShiftModel.findById(shiftId).select(
-    'locationId timezone startAtUtc endAtUtc title requiredSkill',
+    'locationId timezone weekStartLocal localDate startAtUtc endAtUtc title requiredSkill',
   );
   if (input.session) {
     shiftQuery.session(input.session);
@@ -629,6 +828,7 @@ export async function validateAssignment(
         },
       ],
       suggestions: [],
+      complianceImpact: defaultComplianceImpact(),
     };
   }
 
@@ -662,10 +862,11 @@ export async function validateAssignment(
         },
       ],
       suggestions: [],
+      complianceImpact: defaultComplianceImpact(),
     };
   }
 
-  const violations = await evaluateStaffAgainstShift({
+  const evaluation = await evaluateStaffAgainstShift({
     staff: {
       _id: staff._id,
       firstName: staff.firstName,
@@ -675,17 +876,27 @@ export async function validateAssignment(
       _id: shift._id,
       locationId: shift.locationId,
       timezone: shift.timezone,
+      weekStartLocal: shift.weekStartLocal,
+      localDate: shift.localDate,
       startAtUtc: shift.startAtUtc,
       endAtUtc: shift.endAtUtc,
       title: shift.title,
       requiredSkill: shift.requiredSkill,
     },
     locationCode,
+    override: input.override,
     session: input.session,
   });
 
+  const violations = evaluation.violations;
+
   if (violations.length === 0) {
-    return { ok: true, violations: [], suggestions: [] };
+    return {
+      ok: true,
+      violations: [],
+      suggestions: [],
+      complianceImpact: evaluation.complianceImpact,
+    };
   }
 
   const suggestions = await getSuggestions({
@@ -694,6 +905,8 @@ export async function validateAssignment(
       _id: shift._id,
       locationId: shift.locationId,
       timezone: shift.timezone,
+      weekStartLocal: shift.weekStartLocal,
+      localDate: shift.localDate,
       startAtUtc: shift.startAtUtc,
       endAtUtc: shift.endAtUtc,
       title: shift.title,
@@ -707,5 +920,6 @@ export async function validateAssignment(
     ok: false,
     violations,
     suggestions,
+    complianceImpact: evaluation.complianceImpact,
   };
 }

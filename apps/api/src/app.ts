@@ -8,6 +8,7 @@ import { healthRouter } from './routes/health.routes.js';
 import { shiftsRouter } from './routes/shifts.routes.js';
 import { notificationRouter } from './routes/notification.routes.js';
 import { onDutyRouter } from './routes/on-duty.routes.js';
+import { reportsRouter } from './routes/reports.routes.js';
 import { staffRouter } from './routes/staff.routes.js';
 import { swapRequestsRouter } from './routes/swap-requests.routes.js';
 import { usersRouter } from './routes/users.routes.js';
@@ -30,6 +31,7 @@ export const createApp = () => {
   app.use('/shifts', shiftsRouter);
   app.use('/notifications', notificationRouter);
   app.use('/on-duty', onDutyRouter);
+  app.use('/reports', reportsRouter);
   app.use('/staff', staffRouter);
   app.use('/swap-requests', swapRequestsRouter);
   app.use('/users', usersRouter);

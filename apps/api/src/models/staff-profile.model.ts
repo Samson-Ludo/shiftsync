@@ -3,6 +3,7 @@ import { Schema, Types, model } from 'mongoose';
 export interface StaffProfileDoc {
   userId: Types.ObjectId;
   maxHoursPerWeek: number;
+  hourlyRate: number;
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -12,6 +13,7 @@ const staffProfileSchema = new Schema<StaffProfileDoc>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
     maxHoursPerWeek: { type: Number, default: 40 },
+    hourlyRate: { type: Number, required: true, min: 0, default: 18 },
     notes: { type: String },
   },
   { timestamps: true },

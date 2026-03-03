@@ -162,11 +162,24 @@ export type AssignmentValidationResponse = {
   ok: boolean;
   violations: AssignmentViolation[];
   suggestions: AssignmentSuggestion[];
+  complianceImpact: {
+    projectedWeeklyHours: number;
+    projectedDailyHours: number;
+    consecutiveDaysAfterAssignment: number;
+    warnings: Array<{
+      code: string;
+      message: string;
+      details: Record<string, unknown>;
+    }>;
+  };
 };
 
 export type AssignStaffRequest = {
   staffId: string;
-  overrideReason?: string;
+  override?: {
+    allowSeventhDay: true;
+    reason: string;
+  };
 };
 
 export type AssignStaffResponse = {
@@ -176,8 +189,42 @@ export type AssignStaffResponse = {
     staffId: string;
     assignedBy: string;
     status: string;
+    overrideReason?: string;
   };
   validation: AssignmentValidationResponse;
+};
+
+export type OvertimeDriverItem = {
+  assignmentId: string;
+  shiftId: string;
+  shiftTitle: string;
+  localDate: string;
+  startLocalTime: string;
+  endLocalTime: string;
+  assignmentHours: number;
+  projectedHoursAfterAssignment: number;
+  overtimeHoursFromAssignment: number;
+};
+
+export type OvertimeStaffRow = {
+  staffId: string;
+  staffName: string;
+  hourlyRate: number;
+  totalHours: number;
+  overtimeHours: number;
+  overtimePremiumCost: number;
+  overtimeDrivers: OvertimeDriverItem[];
+};
+
+export type OvertimeReportResponse = {
+  location: LocationSummary;
+  weekStartLocal: string;
+  overtimePremiumFormula: string;
+  staff: OvertimeStaffRow[];
+  totals: {
+    projectedOvertimePremiumCost: number;
+    staffOver40Count: number;
+  };
 };
 
 export type StaffOption = {
