@@ -371,3 +371,27 @@ export type ClockActionResponse = {
   onDutyCount: number;
   onDuty: OnDutyEntry[];
 };
+
+export type AuditExportLog = {
+  id: string;
+  createdAt: string;
+  actorId: string;
+  actorName: string | null;
+  action: string;
+  entityType: string;
+  entityId: string;
+  locationId: string | null;
+  beforeSnapshot: Record<string, unknown> | null;
+  afterSnapshot: Record<string, unknown> | null;
+  payload: Record<string, unknown> | null;
+};
+
+export type AuditExportResponse = {
+  range: {
+    start: string;
+    end: string;
+  };
+  locationId: string | null;
+  count: number;
+  logs: AuditExportLog[];
+};

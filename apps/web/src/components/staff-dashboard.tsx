@@ -306,13 +306,14 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
   };
 
   return (
-    <main className="mx-auto max-w-7xl space-y-6 p-6">
-      <header className="panel flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
+    <div className="space-y-6">
+      <header className="panel flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Staff Dashboard</p>
-          <h1 className="font-[family-name:var(--font-heading)] text-2xl font-semibold">
-            Welcome, {user.firstName} {user.lastName}
-          </h1>
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Staff Workspace</p>
+          <h2 className="font-[family-name:var(--font-heading)] text-2xl font-semibold text-ink">
+            Shift Exchange & Coverage
+          </h2>
+          <p className="text-sm text-slate-600">Request swaps, offer drops, and claim available coverage.</p>
         </div>
         <label>
           <span className="mb-1 block text-xs text-slate-500">Week Start</span>
@@ -338,7 +339,7 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
 
       <section className="grid gap-4 lg:grid-cols-[2fr_1fr]">
         <div className="space-y-4">
-          <article className="panel p-5">
+          <article id="my-shifts" className="panel p-5 scroll-mt-24">
             <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">My Shifts</h2>
             {loading ? <p className="mt-3 text-sm text-slate-500">Loading shifts...</p> : null}
             {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
@@ -371,7 +372,7 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
             </ul>
           </article>
 
-          <article className="panel p-5">
+          <article id="swap-requests" className="panel p-5 scroll-mt-24">
             <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">My Swap & Drop Requests</h2>
             {swapLoading ? <p className="mt-3 text-sm text-slate-500">Loading requests...</p> : null}
             <ul className="mt-3 space-y-3">
@@ -433,7 +434,7 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
             </ul>
           </article>
 
-          <article className="panel p-5">
+          <article id="available-drops" className="panel p-5 scroll-mt-24">
             <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">Available Drop Requests</h2>
             <ul className="mt-3 space-y-3">
               {availableDrops.map((request) => (
@@ -562,6 +563,6 @@ export function StaffDashboard({ user }: { user: CurrentUser }) {
           </div>
         </div>
       ) : null}
-    </main>
+    </div>
   );
 }

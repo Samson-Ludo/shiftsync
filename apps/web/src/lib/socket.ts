@@ -33,3 +33,14 @@ export const connectSocketWithStoredToken = (): Socket | null => {
 
   return getSocket(token, defaultApiBaseUrl);
 };
+
+export const disconnectSocket = (): void => {
+  if (!socketInstance) {
+    socketKey = null;
+    return;
+  }
+
+  socketInstance.disconnect();
+  socketInstance = null;
+  socketKey = null;
+};

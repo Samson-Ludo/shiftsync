@@ -1,10 +1,10 @@
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DateTime } from 'luxon';
 import { CurrentUser, OnDutyEntry, UserRole, getOnDuty } from '@/lib/api';
 import { getToken } from '@/lib/api/auth';
 import { useRequireAuth } from '@/lib/auth/useRequireAuth';
 import { getSocket } from '@/lib/socket';
+import { AppLayout } from '@/components/layout/AppLayout';
 
 const allowedRoles: UserRole[] = ['admin', 'manager'];
 
@@ -90,7 +90,8 @@ export default function OnDutyPage() {
   }
 
   return (
-    <main className="mx-auto max-w-6xl space-y-4 p-6">
+    <AppLayout user={user}>
+      <div className="space-y-4">
       <header className="panel flex flex-wrap items-center justify-between gap-3 p-5">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500">On-Duty Dashboard</p>
@@ -113,9 +114,6 @@ export default function OnDutyPage() {
               ))}
             </select>
           </label>
-          <Link href="/manager" className="rounded-md border border-slate-300 px-3 py-2 text-sm">
-            Back to Manager
-          </Link>
         </div>
       </header>
 
@@ -144,6 +142,7 @@ export default function OnDutyPage() {
           ))}
         </ul>
       </section>
-    </main>
+      </div>
+    </AppLayout>
   );
 }

@@ -1,4 +1,5 @@
 import { ManagerDashboard } from '@/components/manager-dashboard';
+import { AppLayout } from '@/components/layout/AppLayout';
 import { UserRole } from '@/lib/api';
 import { useRequireAuth } from '@/lib/auth/useRequireAuth';
 
@@ -17,5 +18,9 @@ export default function ManagerPage() {
     );
   }
 
-  return <ManagerDashboard user={user} />;
+  return (
+    <AppLayout user={user}>
+      <ManagerDashboard user={user} />
+    </AppLayout>
+  );
 }

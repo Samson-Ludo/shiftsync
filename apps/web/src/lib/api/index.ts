@@ -8,6 +8,7 @@ import {
   CreateShiftRequest,
   CurrentUser,
   ClockActionResponse,
+  AuditExportResponse,
   EligibleSwapStaffResponse,
   ListNotificationsResponse,
   ListSwapRequestsResponse,
@@ -262,6 +263,39 @@ export const getShiftAudit = async (
 ): Promise<ShiftAuditResponse> => {
   const { data } = await api.get<ShiftAuditResponse>(`/shifts/${shiftId}/audit`, {
     params: { limit },
+  });
+  return data;
+};
+
+export const getAuditExport = async (args: {
+  start: string;
+  end: string;
+  locationId?: string;
+}): Promise<AuditExportResponse> => {
+  const { data } = await api.get<AuditExportResponse>('/audit/export', {
+    params: {
+      start: args.start,
+      end: args.end,
+      ...(args.locationId ? { locationId: args.locationId } : {}),
+      format: 'json',
+    },
+  });
+  return data;
+};
+
+export const downloadAuditExportCsv = async (args: {
+  start: string;
+  end: string;
+  locationId?: string;
+}): Promise<Blob> => {
+  const { data } = await api.get<Blob>('/audit/export', {
+    params: {
+      start: args.start,
+      end: args.end,
+      ...(args.locationId ? { locationId: args.locationId } : {}),
+      format: 'csv',
+    },
+    responseType: 'blob',
   });
   return data;
 };

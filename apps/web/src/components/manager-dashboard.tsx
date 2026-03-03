@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 import { DateTime } from 'luxon';
 import {
   ApiError,
@@ -522,29 +521,17 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
   };
 
   return (
-    <main className="mx-auto max-w-7xl space-y-6 p-6">
-      <header className="panel flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
+    <div className="space-y-6">
+      <header className="panel flex flex-col gap-4 p-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Manager Dashboard</p>
-          <h1 className="font-[family-name:var(--font-heading)] text-2xl font-semibold">ShiftSync</h1>
-          <p className="text-sm text-slate-600">
-            {user.firstName} {user.lastName} ({user.role})
-          </p>
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Shift Planning</p>
+          <h2 className="font-[family-name:var(--font-heading)] text-2xl font-semibold text-ink">
+            Weekly Assignment Control
+          </h2>
+          <p className="text-sm text-slate-600">Manage shifts, staffing rules, and approval workflows.</p>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="sm:col-span-2 flex flex-wrap gap-2">
-            <Link href="/on-duty" className="inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm">
-              View On-Duty Dashboard
-            </Link>
-            <Link href="/overtime" className="inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm">
-              View Overtime Dashboard
-            </Link>
-            <Link href="/fairness" className="inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm">
-              View Fairness Analytics
-            </Link>
-          </div>
-
           <label>
             <span className="mb-1 block text-xs text-slate-500">Location</span>
             <select
@@ -870,7 +857,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
             )}
           </section>
 
-          <section className="panel p-5">
+          <section id="swap-inbox" className="panel p-5 scroll-mt-24">
             <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">
               Swap / Coverage Inbox
             </h2>
@@ -997,6 +984,6 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
           </div>
         </div>
       ) : null}
-    </main>
+    </div>
   );
 }

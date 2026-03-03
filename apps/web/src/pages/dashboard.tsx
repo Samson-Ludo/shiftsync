@@ -1,5 +1,6 @@
 import { ManagerDashboard } from '@/components/manager-dashboard';
 import { StaffDashboard } from '@/components/staff-dashboard';
+import { AppLayout } from '@/components/layout/AppLayout';
 import { useRequireAuth } from '@/lib/auth/useRequireAuth';
 
 export default function DashboardPage() {
@@ -16,8 +17,16 @@ export default function DashboardPage() {
   }
 
   if (user.role === 'staff') {
-    return <StaffDashboard user={user} />;
+    return (
+      <AppLayout user={user}>
+        <StaffDashboard user={user} />
+      </AppLayout>
+    );
   }
 
-  return <ManagerDashboard user={user} />;
+  return (
+    <AppLayout user={user}>
+      <ManagerDashboard user={user} />
+    </AppLayout>
+  );
 }

@@ -4,6 +4,18 @@ import { ApiError, login } from '@/lib/api';
 import { setToken } from '@/lib/api/auth';
 import { connectSocketWithStoredToken } from '@/lib/socket';
 
+const routeAfterLogin = (role: 'admin' | 'manager' | 'staff'): string => {
+  if (role === 'staff') {
+    return '/staff';
+  }
+
+  if (role === 'manager') {
+    return '/manager';
+  }
+
+  return '/dashboard';
+};
+
 export function LoginForm() {
   const router = useRouter();
   const [email, setEmail] = useState('maya.manager@coastaleats.com');
@@ -20,7 +32,7 @@ export function LoginForm() {
       const payload = await login(email, password);
       setToken(payload.token);
       connectSocketWithStoredToken();
-      await router.push('/dashboard');
+      await router.push(routeAfterLogin(payload.user.role));
     } catch (error) {
       if (error instanceof ApiError) {
         setError(error.message || 'Unable to sign in');

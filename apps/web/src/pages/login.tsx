@@ -4,6 +4,18 @@ import { LoginForm } from '@/components/login-form';
 import { clearToken, getToken } from '@/lib/api/auth';
 import { me } from '@/lib/api';
 
+const routeAfterLogin = (role: 'admin' | 'manager' | 'staff'): string => {
+  if (role === 'staff') {
+    return '/staff';
+  }
+
+  if (role === 'manager') {
+    return '/manager';
+  }
+
+  return '/dashboard';
+};
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -16,9 +28,9 @@ export default function LoginPage() {
       }
 
       try {
-        await me();
+        const currentUser = await me();
         if (active) {
-          void router.replace('/dashboard');
+          void router.replace(routeAfterLogin(currentUser.role));
         }
       } catch {
         clearToken();

@@ -288,6 +288,25 @@ Behavior highlights:
 - JWT is stored in browser `localStorage` for take-home speed/simplicity.
   - This is intentionally temporary and should be upgraded to httpOnly cookies in production.
 
+## Layout & Navigation Architecture
+
+- Protected pages render inside `AppLayout` (`apps/web/src/components/layout/AppLayout.tsx`).
+- `AppLayout` provides:
+  - persistent desktop sidebar
+  - mobile slide-in drawer with backdrop, ESC close, and keyboard focus trap
+  - top header with route-derived page title plus current user identity
+- Sidebar logic is centralized in:
+  - `apps/web/src/components/navigation/Sidebar.tsx`
+  - `apps/web/src/components/navigation/nav-config.ts`
+- Navigation is role-aware:
+  - Admin: dashboard, manager view, fairness, overtime, audit, notifications
+  - Manager: dashboard, on-duty, overtime, fairness, swap inbox, notifications
+  - Staff: my shifts, available drops, swap requests, notifications
+- Logout is client-side and stateless:
+  - clear JWT from `localStorage`
+  - disconnect Socket.IO client
+  - redirect to `/login`
+
 ## Assignment Concurrency Model
 
 Assignment creation now uses a lock + transaction + revalidation sequence to prevent race conditions:

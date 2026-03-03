@@ -1,8 +1,8 @@
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DateTime } from 'luxon';
 import { ApiError, OvertimeReportResponse, UserRole, getOvertimeReport } from '@/lib/api';
 import { useRequireAuth } from '@/lib/auth/useRequireAuth';
+import { AppLayout } from '@/components/layout/AppLayout';
 
 const managerRoles: UserRole[] = ['admin', 'manager'];
 const mondayIso = () => DateTime.now().startOf('week').toISODate() ?? DateTime.now().toISODate()!;
@@ -71,7 +71,8 @@ export default function OvertimePage() {
   }
 
   return (
-    <main className="mx-auto max-w-7xl space-y-4 p-6">
+    <AppLayout user={user}>
+      <div className="space-y-4">
       <header className="panel flex flex-wrap items-center justify-between gap-3 p-5">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Overtime Dashboard</p>
@@ -106,9 +107,6 @@ export default function OvertimePage() {
               onChange={(event) => setWeekStart(event.target.value)}
             />
           </label>
-          <Link href="/manager" className="rounded-md border border-slate-300 px-3 py-2 text-sm">
-            Back to Manager
-          </Link>
         </div>
       </header>
 
@@ -167,6 +165,7 @@ export default function OvertimePage() {
           ) : null}
         </ul>
       </section>
-    </main>
+      </div>
+    </AppLayout>
   );
 }

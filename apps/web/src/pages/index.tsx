@@ -11,7 +11,17 @@ export default function HomePage() {
       return;
     }
 
-    void router.replace(user.role === 'staff' ? '/staff' : '/manager');
+    if (user.role === 'staff') {
+      void router.replace('/staff');
+      return;
+    }
+
+    if (user.role === 'manager') {
+      void router.replace('/manager');
+      return;
+    }
+
+    void router.replace('/dashboard');
   }, [loading, router, user]);
 
   return (

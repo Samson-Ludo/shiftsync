@@ -1,8 +1,8 @@
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DateTime } from 'luxon';
 import { ApiError, FairnessReportResponse, UserRole, getFairnessReport } from '@/lib/api';
 import { useRequireAuth } from '@/lib/auth/useRequireAuth';
+import { AppLayout } from '@/components/layout/AppLayout';
 
 const managerRoles: UserRole[] = ['admin', 'manager'];
 
@@ -87,7 +87,8 @@ export default function FairnessPage() {
   }
 
   return (
-    <main className="mx-auto max-w-7xl space-y-4 p-6">
+    <AppLayout user={user}>
+      <div className="space-y-4">
       <header className="panel flex flex-wrap items-center justify-between gap-3 p-5">
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-slate-500">Analytics</p>
@@ -115,9 +116,6 @@ export default function FairnessPage() {
             <span className="mr-2 text-xs text-slate-500">End</span>
             <input className="input" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
           </label>
-          <Link href="/manager" className="rounded-md border border-slate-300 px-3 py-2 text-sm">
-            Back to Manager
-          </Link>
         </div>
       </header>
 
@@ -176,7 +174,7 @@ export default function FairnessPage() {
           </p>
         ) : null}
       </section>
-    </main>
+      </div>
+    </AppLayout>
   );
 }
-

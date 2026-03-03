@@ -1,4 +1,5 @@
 import { StaffDashboard } from '@/components/staff-dashboard';
+import { AppLayout } from '@/components/layout/AppLayout';
 import { UserRole } from '@/lib/api';
 import { useRequireAuth } from '@/lib/auth/useRequireAuth';
 
@@ -17,5 +18,9 @@ export default function StaffPage() {
     );
   }
 
-  return <StaffDashboard user={user} />;
+  return (
+    <AppLayout user={user}>
+      <StaffDashboard user={user} />
+    </AppLayout>
+  );
 }

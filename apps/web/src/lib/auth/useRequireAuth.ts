@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { CurrentUser, UserRole, me } from '@/lib/api';
 import { clearToken, getToken } from '@/lib/api/auth';
-import { connectSocketWithStoredToken } from '@/lib/socket';
+import { connectSocketWithStoredToken, disconnectSocket } from '@/lib/socket';
 
 type UseRequireAuthOptions = {
   allowedRoles?: UserRole[];
@@ -33,6 +33,7 @@ export const useRequireAuth = (options: UseRequireAuthOptions = {}) => {
     const run = async () => {
       const token = getToken();
       if (!token) {
+        disconnectSocket();
         if (active) {
           setLoading(false);
           void router.replace(options.redirectTo ?? '/login');
@@ -60,6 +61,7 @@ export const useRequireAuth = (options: UseRequireAuthOptions = {}) => {
           return;
         }
 
+        disconnectSocket();
         clearToken();
         void router.replace(options.redirectTo ?? '/login');
       } finally {
