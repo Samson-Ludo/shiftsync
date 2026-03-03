@@ -49,7 +49,7 @@ export default function LoginPage() {
       <section className="panel grid w-full max-w-3xl grid-cols-1 overflow-hidden lg:grid-cols-2">
         <div className="bg-ink p-8 text-sand">
           <p className="text-xs uppercase tracking-[0.25em] text-cyan-200">Coastal Eats</p>
-          <h1 className="mt-3 text-3xl font-semibold">ShiftSync MVP</h1>
+          <h1 className="mt-3 text-3xl font-semibold">ShiftSync</h1>
           <p className="mt-3 text-sm text-slate-100/85">
             Multi-location scheduling across LA and New York. Log in as Admin, Manager, or Staff.
           </p>

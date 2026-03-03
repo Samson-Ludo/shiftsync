@@ -2,12 +2,33 @@
 
 Foundational end-to-end MVP for **ShiftSync**, a multi-location staff scheduling platform for **Coastal Eats**.
 
+![alt text](image.png)
+![alt text](image-1.png)
+![alt text](image-2.png)
+
 ## Stack
 
-- Frontend: Next.js Pages Router + TypeScript + Tailwind CSS + Socket.IO client
-- Backend: Express + TypeScript + Mongoose + Zod + JWT + Socket.IO server
-- DB: MongoDB Atlas
-- Target deploys: Netlify (web), Render (api), MongoDB Atlas
+**Frontend**  
+![Next.js Pages Router](https://img.shields.io/badge/Next.js-Pages%20Router-000000?logo=next.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?logo=tailwindcss&logoColor=white)
+![Socket.IO Client](https://img.shields.io/badge/Socket.IO-Client-010101?logo=socket.io&logoColor=white)
+
+**Backend**  
+![Express](https://img.shields.io/badge/Express-000000?logo=express&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Mongoose](https://img.shields.io/badge/Mongoose-880000?logo=mongoose&logoColor=white)
+![Zod](https://img.shields.io/badge/Zod-3E67B1)
+![JWT](https://img.shields.io/badge/JWT-000000?logo=jsonwebtokens&logoColor=white)
+![Socket.IO Server](https://img.shields.io/badge/Socket.IO-Server-010101?logo=socket.io&logoColor=white)
+
+**Database**  
+![MongoDB Atlas](https://img.shields.io/badge/MongoDB_Atlas-47A248?logo=mongodb&logoColor=white)
+
+**Deployment Targets**  
+![Netlify](https://img.shields.io/badge/Netlify-00C7B7?logo=netlify&logoColor=white)
+![Render](https://img.shields.io/badge/Render-46E3B7?logo=render&logoColor=111827)
+![MongoDB Atlas](https://img.shields.io/badge/MongoDB_Atlas-47A248?logo=mongodb&logoColor=white)
 
 ## Repo Layout
 
@@ -204,6 +225,7 @@ All seeded users use password: `Pass123!`
 - Admin: `admin@coastaleats.com`
 - Manager: `maya.manager@coastaleats.com`
 - Staff: `ava.staff@coastaleats.com`
+- Staff (swap demo): `ethan.staff@coastaleats.com`
 
 ## MVP API Surface
 
@@ -353,7 +375,7 @@ Conflict handling:
 
 1. Run seed and log in as manager (`maya.manager@coastaleats.com`).
 2. Confirm web uses Pages routes:
-   - `/login`, `/dashboard`, `/manager`, `/staff`, `/notifications`, `/on-duty`, `/overtime`, `/fairness`
+   - `/login`, `/dashboard`, `/manager`, `/staff`, `/notifications`, `/on-duty`, `/overtime`, `/fairness`, `/audit` (admin only)
 3. Confirm API calls are direct to `NEXT_PUBLIC_API_BASE_URL` by checking the browser network tab (no `/api/*` requests).
 4. In manager dashboard, switch locations and week start; confirm only assigned locations appear.
 5. Select a shift in manager dashboard and test assignment constraints:
@@ -372,43 +394,62 @@ Conflict handling:
    - trigger assignment and confirm new notification appears via realtime
 10. Open `/on-duty` (manager/admin), choose a location, then call `POST /shifts/:id/clock-in` and `POST /shifts/:id/clock-out` for assigned staff; confirm the list updates live without refresh.
 11. Regret Swap scenario:
-   - Log in as `ethan.staff@coastaleats.com`, open `Regret Swap Demo`, and verify swap lifecycle in staff requests.
-   - Log in as manager, open swap inbox, and approve/reject with reason.
+
+- Log in as `ethan.staff@coastaleats.com`, open `Regret Swap Demo`, and verify swap lifecycle in staff requests.
+- Log in as manager, open swap inbox, and approve/reject with reason.
+
 12. Sunday Night Chaos scenario:
-   - Log in as `ava.staff@coastaleats.com`, create/drop coverage for `Sunday Night Chaos`.
-   - Log in as another eligible staff user and claim the request.
-   - Finalize as manager from the swap inbox.
+
+- Log in as `ava.staff@coastaleats.com`, create/drop coverage for `Sunday Night Chaos`.
+- Log in as another eligible staff user and claim the request.
+- Finalize as manager from the swap inbox.
+
 13. Shift edit cancellation edge case:
-   - Create a pending swap/drop request.
-   - Edit that shift as manager and confirm request auto-cancels with realtime + notification.
+
+- Create a pending swap/drop request.
+- Edit that shift as manager and confirm request auto-cancels with realtime + notification.
+
 14. Compliance what-if + override scenario:
-   - In manager dashboard, choose a staff/shift pair that pushes weekly totals to 35+ / 40+ and confirm warnings appear before assignment.
-   - Choose a pairing that triggers 7th consecutive day, verify hard block + required override reason UI.
-   - Submit assignment with override and verify it succeeds only when reason is provided.
+
+- In manager dashboard, choose a staff/shift pair that pushes weekly totals to 35+ / 40+ and confirm warnings appear before assignment.
+- Choose a pairing that triggers 7th consecutive day, verify hard block + required override reason UI.
+- Submit assignment with override and verify it succeeds only when reason is provided.
+
 15. Overtime report scenario:
-   - Open `/overtime`, select location + week, and verify:
-   - projected premium formula = `hoursOver40 * hourlyRate * 0.5`
-   - staff over 40h are highlighted
-   - assignment rows identify which shifts pushed overtime
+
+- Open `/overtime`, select location + week, and verify:
+- projected premium formula = `hoursOver40 * hourlyRate * 0.5`
+- staff over 40h are highlighted
+- assignment rows identify which shifts pushed overtime
+
 16. Fairness report scenario:
-   - Open `/fairness`, select location + date range.
-   - Verify premium definition (Friday/Saturday 17:00-23:00 local start) and per-staff fairness scores.
-   - Verify under/over indicators relative to `desiredWeeklyHours`.
+
+- Open `/fairness`, select location + date range.
+- Verify premium definition (Friday/Saturday 17:00-23:00 local start) and per-staff fairness scores.
+- Verify under/over indicators relative to `desiredWeeklyHours`.
+
 17. Shift history scenario:
-   - In manager dashboard, pick a shift and open `History` tab.
-   - Confirm create/edit/publish/assignment/swap-related events appear with actor + before/after snapshots.
+
+- In manager dashboard, pick a shift and open `History` tab.
+- Confirm create/edit/publish/assignment/swap-related events appear with actor + before/after snapshots.
+
 18. Audit export scenario (admin):
-   - Call `GET /audit/export?locationId=<id>&start=<iso>&end=<iso>&format=json` and verify returned records.
-   - Call same endpoint with `format=csv` and verify downloadable CSV format.
+
+- Call `GET /audit/export?locationId=<id>&start=<iso>&end=<iso>&format=json` and verify returned records.
+- Call same endpoint with `format=csv` and verify downloadable CSV format.
+
 19. Availability audit scenario:
-   - Create/update/delete availability rules/exceptions through `/staff/:id/availability-*` endpoints as manager/admin.
-   - Verify corresponding audit records appear in shift history payload links and audit export.
+
+- Create/update/delete availability rules/exceptions through `/staff/:id/availability-*` endpoints as manager/admin.
+- Verify corresponding audit records appear in shift history payload links and audit export.
+
 20. Concurrency test (two manager windows):
-   - Open two browser windows and log in as managers who can access the same location.
-   - Pick two different shifts and the same staff member.
-   - Click **Confirm Assign** in both windows at nearly the same time.
-   - Expected: exactly one request succeeds; the other returns `409 conflict_detected`.
-   - Expected UI: losing manager immediately sees a conflict banner via Socket.IO, and successful assignment emits `assignment_created` causing live shift list refresh.
+
+- Open two browser windows and log in as managers who can access the same location.
+- Pick two different shifts and the same staff member.
+- Click **Confirm Assign** in both windows at nearly the same time.
+- Expected: exactly one request succeeds; the other returns `409 conflict_detected`.
+- Expected UI: losing manager immediately sees a conflict banner via Socket.IO, and successful assignment emits `assignment_created` causing live shift list refresh.
 
 ## Constraint Tests
 
@@ -444,11 +485,11 @@ npm run test:constraints -w apps/api
 - Audit trail with shift history and admin export
 - Timezone correctness for DST/overnight/local display
 
-## Notes / TODOs
+## Implementation Notes (Completed Scope)
 
 - Assignment constraints enforce overlap, minimum rest, required skill, certification, availability, and labor compliance warnings/blocks.
 - Swap/drop lifecycle supports creation, accept/claim, manager approval/rejection, cancellation, expiry, and realtime notifications.
 - Overtime report includes premium-cost projection and overtime-driving assignment highlights.
 - Fairness report includes premium-shift equity + desired-hour deltas with explicit scoring formula.
 - Audit trail supports before/after snapshots and admin export in JSON/CSV.
-- No shared `packages/` types package added yet to keep MVP simple and avoid premature abstraction.
+- Intentional MVP non-goal: no shared `packages/` types package yet, to avoid premature abstraction.
