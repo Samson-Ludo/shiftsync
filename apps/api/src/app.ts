@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { env } from './config/env.js';
+import { auditRouter } from './routes/audit.routes.js';
 import { authRouter } from './routes/auth.routes.js';
 import { deferredRouter } from './routes/deferred.routes.js';
 import { healthRouter } from './routes/health.routes.js';
@@ -28,6 +29,7 @@ export const createApp = () => {
 
   app.use('/health', healthRouter);
   app.use('/auth', authRouter);
+  app.use('/audit', auditRouter);
   app.use('/shifts', shiftsRouter);
   app.use('/notifications', notificationRouter);
   app.use('/on-duty', onDutyRouter);

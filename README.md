@@ -14,6 +14,8 @@ Foundational end-to-end MVP for **ShiftSync**, a multi-location staff scheduling
 - `apps/api`: Express API
 - `apps/web`: Next.js web app
 
+Deployment runbook is in `docs/deploy.md` (Render + Netlify + Atlas).
+
 ## Time Handling Decisions
 
 - All shift times are stored in UTC in MongoDB (`startAtUtc`, `endAtUtc`).
@@ -21,6 +23,21 @@ Foundational end-to-end MVP for **ShiftSync**, a multi-location staff scheduling
 - Overnight shifts are handled as one shift: if end time is <= start time, end is moved to the next day.
 - UI/API responses also include location-local formatted output for display.
 - Week grouping uses ISO Monday week start (`weekStartLocal`) in the location timezone.
+
+## Ambiguity Decisions
+
+- Desired hours vs availability:
+  - `desiredWeeklyHours` is treated as a planning target for fairness analytics, not a hard scheduling block.
+  - Availability violations still block assignment independently via validator rules.
+- De-certification impact on history:
+  - Historical shifts/assignments/audit logs are immutable snapshots; de-certifying staff later does not rewrite past records.
+- Consecutive day counting:
+  - Any shift touching a local calendar day counts that day as worked (overnight may count on two local dates).
+- Shift edited after swap approval but before occurrence:
+  - Approved swap is final for assignment ownership; later shift edits do not auto-revert approved changes.
+  - Only non-final swap statuses are auto-cancelled on shift edit.
+- Location spanning timezone boundary:
+  - Each location is evaluated strictly in its own configured timezone; no cross-location blended timezone calculations.
 
 ## Local Setup
 
@@ -87,6 +104,7 @@ Seed script (`apps/api/src/seed.ts`) provides:
 - Recurring weekly availability rules + 4 one-off availability exceptions
 - Overnight shift: `23:00 -> 03:00` next day
 - Hour-risk arrangement: one staff assigned 48h + extra 4h shift available (52h risk)
+- Premium fairness setup: Friday/Saturday evening premium shifts concentrated on one staff
 - Overlap conflict setup: two LA shifts that overlap for potential double-booking
 - `Regret Swap Demo`: accepted swap request waiting for manager approval
 - `Sunday Night Chaos`: near-term drop request open for claim + manager approval path
@@ -131,6 +149,54 @@ Override behavior:
 - Override event is written to `AuditLog`
 - Validator response always includes `complianceImpact` for what-if projection.
 
+## Fairness Analytics
+
+Fairness report endpoint:
+
+- `GET /reports/fairness?locationId&startDate&endDate`
+
+Returned metrics per staff:
+
+- total assigned hours in period
+- premium shift count
+- desired hours for period (from `desiredWeeklyHours`)
+- delta (`assigned - desired`)
+- fairness score and under/over/balanced indicator
+
+Premium shift definition:
+
+- Shift start falls on Friday or Saturday
+- Start time in location timezone is between `17:00` and `23:00` inclusive
+
+Scoring approach (defensible/simple):
+
+- `premiumBalanceScore = 100 - ((abs(staffPremium - premiumTargetPerStaff) / max(1, premiumTargetPerStaff)) * 100)`
+- `hoursBalanceScore = 100 - ((abs(assignedHours - desiredHoursForPeriod) / max(1, desiredHoursForPeriod)) * 100)`
+- `fairnessScore = 0.6 * premiumBalanceScore + 0.4 * hoursBalanceScore` (clamped to `0-100`)
+- overall fairness score is the average per-staff fairness score for certified staff in the location
+
+## Audit Trail
+
+Audit records persist:
+
+- `actorId` (+ user linkage when actor is a user)
+- `action`, `entityType`, `entityId`
+- `locationId` when applicable
+- `beforeSnapshot`, `afterSnapshot`
+- timestamp (`createdAt`)
+
+Covered change areas:
+
+- shift create/edit/publish/unpublish
+- assignment create/remove/reassign via swap approval
+- swap lifecycle transitions (requested, accepted, claimed, approved, rejected, cancelled, expired)
+- availability rule/exception create/update/delete
+
+Audit endpoints:
+
+- `GET /shifts/:id/audit` (manager/admin history view)
+- `GET /audit/export?locationId&start&end&format=json|csv` (admin export)
+
 ## Test Login Credentials
 
 All seeded users use password: `Pass123!`
@@ -158,8 +224,18 @@ All seeded users use password: `Pass123!`
 - `POST /shifts/:id/clock-out`
 - `POST /shifts/:id/validate-assign/:staffId`
 - `DELETE /shifts/:id/assignments/:assignmentId`
+- `GET /shifts/:id/audit`
 - `GET /reports/overtime?locationId&weekStart`
+- `GET /reports/fairness?locationId&startDate&endDate`
+- `GET /audit/export?locationId&start&end&format=json|csv`
 - `GET /staff?locationId=<id>`
+- `GET /staff/:id/availability`
+- `POST /staff/:id/availability-rules`
+- `PATCH /staff/:id/availability-rules/:ruleId`
+- `DELETE /staff/:id/availability-rules/:ruleId`
+- `POST /staff/:id/availability-exceptions`
+- `PATCH /staff/:id/availability-exceptions/:exceptionId`
+- `DELETE /staff/:id/availability-exceptions/:exceptionId`
 - `GET /on-duty?locationId=<id>`
 - `GET /swap-requests?mine=true`
 - `GET /swap-requests?available=true`
@@ -240,7 +316,7 @@ Conflict handling:
 
 1. Run seed and log in as manager (`maya.manager@coastaleats.com`).
 2. Confirm web uses Pages routes:
-   - `/login`, `/dashboard`, `/manager`, `/staff`, `/notifications`
+   - `/login`, `/dashboard`, `/manager`, `/staff`, `/notifications`, `/on-duty`, `/overtime`, `/fairness`
 3. Confirm API calls are direct to `NEXT_PUBLIC_API_BASE_URL` by checking the browser network tab (no `/api/*` requests).
 4. In manager dashboard, switch locations and week start; confirm only assigned locations appear.
 5. Select a shift in manager dashboard and test assignment constraints:
@@ -277,7 +353,20 @@ Conflict handling:
    - projected premium formula = `hoursOver40 * hourlyRate * 0.5`
    - staff over 40h are highlighted
    - assignment rows identify which shifts pushed overtime
-16. Concurrency test (two manager windows):
+16. Fairness report scenario:
+   - Open `/fairness`, select location + date range.
+   - Verify premium definition (Friday/Saturday 17:00-23:00 local start) and per-staff fairness scores.
+   - Verify under/over indicators relative to `desiredWeeklyHours`.
+17. Shift history scenario:
+   - In manager dashboard, pick a shift and open `History` tab.
+   - Confirm create/edit/publish/assignment/swap-related events appear with actor + before/after snapshots.
+18. Audit export scenario (admin):
+   - Call `GET /audit/export?locationId=<id>&start=<iso>&end=<iso>&format=json` and verify returned records.
+   - Call same endpoint with `format=csv` and verify downloadable CSV format.
+19. Availability audit scenario:
+   - Create/update/delete availability rules/exceptions through `/staff/:id/availability-*` endpoints as manager/admin.
+   - Verify corresponding audit records appear in shift history payload links and audit export.
+20. Concurrency test (two manager windows):
    - Open two browser windows and log in as managers who can access the same location.
    - Pick two different shifts and the same staff member.
    - Click **Confirm Assign** in both windows at nearly the same time.
@@ -305,9 +394,24 @@ npm run test:constraints -w apps/api
 - **MongoDB Atlas**:
   - Set `MONGODB_URI` to your Atlas connection string in Render.
 
+## Acceptance Checklist
+
+- Roles and location scoping
+- Shift scheduling with constraints + suggestions
+- Swap/drop workflow with edge-case cancellation/expiry/limits
+- Overtime warnings + what-if + 7th-day override reason capture
+- Fairness analytics + premium shift tracking
+- Real-time schedule/assignment/swap/conflict events
+- On-duty live dashboard
+- Notifications center with preferences + async email simulation
+- Audit trail with shift history and admin export
+- Timezone correctness for DST/overnight/local display
+
 ## Notes / TODOs
 
 - Assignment constraints enforce overlap, minimum rest, required skill, certification, availability, and labor compliance warnings/blocks.
 - Swap/drop lifecycle supports creation, accept/claim, manager approval/rejection, cancellation, expiry, and realtime notifications.
 - Overtime report includes premium-cost projection and overtime-driving assignment highlights.
+- Fairness report includes premium-shift equity + desired-hour deltas with explicit scoring formula.
+- Audit trail supports before/after snapshots and admin export in JSON/CSV.
 - No shared `packages/` types package added yet to keep MVP simple and avoid premature abstraction.

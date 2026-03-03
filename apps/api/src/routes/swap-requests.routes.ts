@@ -28,6 +28,7 @@ import {
   countActiveSwapRequestsForStaff,
   dispatchSwapLifecycle,
 } from '../services/swap.service.js';
+import { recordAuditLog } from '../services/audit.service.js';
 
 const createSwapRequestSchema = z.object({
   query: z.object({}).optional().default({}),
@@ -245,6 +246,47 @@ const toSwapRequestView = async (requests: SwapLeanDoc[]) => {
     .filter((request): request is NonNullable<typeof request> => Boolean(request));
 };
 
+const auditSwapStatusChange = async (args: {
+  actorId: string;
+  action: string;
+  requestBefore: SwapLeanDoc;
+  requestAfter: SwapLeanDoc;
+  locationId: Types.ObjectId;
+  reason?: string;
+  session?: mongoose.ClientSession;
+}) => {
+  await recordAuditLog({
+    actorId: args.actorId,
+    action: args.action,
+    entityType: 'swap_request',
+    entityId: args.requestAfter._id.toString(),
+    locationId: args.locationId,
+    beforeSnapshot: {
+      type: args.requestBefore.type,
+      status: args.requestBefore.status,
+      shiftId: args.requestBefore.shiftId.toString(),
+      fromStaffId: args.requestBefore.fromStaffId.toString(),
+      toStaffId: args.requestBefore.toStaffId?.toString() ?? null,
+      note: args.requestBefore.note ?? null,
+      expiresAtUtc: args.requestBefore.expiresAtUtc.toISOString(),
+    },
+    afterSnapshot: {
+      type: args.requestAfter.type,
+      status: args.requestAfter.status,
+      shiftId: args.requestAfter.shiftId.toString(),
+      fromStaffId: args.requestAfter.fromStaffId.toString(),
+      toStaffId: args.requestAfter.toStaffId?.toString() ?? null,
+      note: args.requestAfter.note ?? null,
+      expiresAtUtc: args.requestAfter.expiresAtUtc.toISOString(),
+    },
+    payload: {
+      shiftId: args.requestAfter.shiftId.toString(),
+      ...(args.reason ? { reason: args.reason } : {}),
+    },
+    session: args.session,
+  });
+};
+
 export const swapRequestsRouter = Router();
 
 swapRequestsRouter.get(
@@ -441,6 +483,27 @@ swapRequestsRouter.post(
       ...(note ? { note } : {}),
     });
 
+    await recordAuditLog({
+      actorId: user.userId,
+      action: 'swap_request_created',
+      entityType: 'swap_request',
+      entityId: swapRequest._id.toString(),
+      locationId: shift.locationId,
+      beforeSnapshot: null,
+      afterSnapshot: {
+        type: swapRequest.type,
+        status: swapRequest.status,
+        shiftId: swapRequest.shiftId.toString(),
+        fromStaffId: swapRequest.fromStaffId.toString(),
+        toStaffId: swapRequest.toStaffId?.toString() ?? null,
+        note: swapRequest.note ?? null,
+        expiresAtUtc: swapRequest.expiresAtUtc.toISOString(),
+      },
+      payload: {
+        shiftId: shift._id.toString(),
+      },
+    });
+
     await dispatchSwapLifecycle({
       io: req.app.get('io'),
       swapRequest: {
@@ -566,6 +629,15 @@ swapRequestsRouter.post(
       return;
     }
 
+    await auditSwapStatusChange({
+      actorId: user.userId,
+      action: 'swap_request_accepted',
+      requestBefore: request,
+      requestAfter: accepted,
+      locationId: shift.locationId,
+      reason: accepted.note,
+    });
+
     await dispatchSwapLifecycle({
       io: req.app.get('io'),
       swapRequest: {
@@ -664,6 +736,15 @@ swapRequestsRouter.post(
       ).lean()) as SwapLeanDoc | null;
 
       if (expired) {
+        await auditSwapStatusChange({
+          actorId: 'swap-expiry-guard',
+          action: 'swap_request_expired',
+          requestBefore: request,
+          requestAfter: expired,
+          locationId: shift.locationId,
+          reason: expired.note,
+        });
+
         await dispatchSwapLifecycle({
           io: req.app.get('io'),
           swapRequest: {
@@ -730,6 +811,15 @@ swapRequestsRouter.post(
       });
       return;
     }
+
+    await auditSwapStatusChange({
+      actorId: user.userId,
+      action: 'drop_request_claimed',
+      requestBefore: request,
+      requestAfter: claimed,
+      locationId: shift.locationId,
+      reason: claimed.note,
+    });
 
     await dispatchSwapLifecycle({
       io: req.app.get('io'),
@@ -827,6 +917,15 @@ swapRequestsRouter.post(
       });
       return;
     }
+
+    await auditSwapStatusChange({
+      actorId: user.userId,
+      action: 'swap_request_cancelled',
+      requestBefore: request,
+      requestAfter: cancelled,
+      locationId: shift.locationId,
+      reason,
+    });
 
     await dispatchSwapLifecycle({
       io: req.app.get('io'),
@@ -1025,6 +1124,45 @@ swapRequestsRouter.post(
           },
           { session },
         );
+
+        const approvedInTx = {
+          ...txRequest,
+          status: 'approved' as const,
+        };
+
+        await auditSwapStatusChange({
+          actorId: user.userId,
+          action: 'swap_request_approved',
+          requestBefore: txRequest,
+          requestAfter: approvedInTx,
+          locationId: txShift.locationId,
+          session,
+        });
+
+        await recordAuditLog({
+          actorId: user.userId,
+          action: 'assignment_reassigned_via_swap_approval',
+          entityType: 'shift_assignment',
+          entityId: assignment._id.toString(),
+          locationId: txShift.locationId,
+          beforeSnapshot: {
+            shiftId: assignment.shiftId.toString(),
+            staffId: txRequest.fromStaffId.toString(),
+            status: 'assigned',
+          },
+          afterSnapshot: {
+            shiftId: assignment.shiftId.toString(),
+            staffId: txRequest.toStaffId.toString(),
+            status: 'assigned',
+          },
+          payload: {
+            shiftId: txShift._id.toString(),
+            swapRequestId: txRequest._id.toString(),
+            fromStaffId: txRequest.fromStaffId.toString(),
+            toStaffId: txRequest.toStaffId.toString(),
+          },
+          session,
+        });
 
         await session.commitTransaction();
 
@@ -1233,6 +1371,15 @@ swapRequestsRouter.post(
       });
       return;
     }
+
+    await auditSwapStatusChange({
+      actorId: user.userId,
+      action: 'swap_request_rejected',
+      requestBefore: request,
+      requestAfter: rejected,
+      locationId: shift.locationId,
+      reason,
+    });
 
     await dispatchSwapLifecycle({
       io: req.app.get('io'),

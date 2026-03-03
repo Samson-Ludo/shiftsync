@@ -27,6 +27,7 @@ type StaffSeed = {
   firstName: string;
   lastName: string;
   email: string;
+  desiredWeeklyHours?: number;
   maxHoursPerWeek: number;
   hourlyRate: number;
   certifications: string[];
@@ -55,6 +56,7 @@ const staffSeedData: StaffSeed[] = [
     firstName: 'Ava',
     lastName: 'Ramirez',
     email: 'ava.staff@coastaleats.com',
+    desiredWeeklyHours: 32,
     maxHoursPerWeek: 40,
     hourlyRate: 23.5,
     certifications: ['NYC_MID', 'NYC_BRK'],
@@ -64,6 +66,7 @@ const staffSeedData: StaffSeed[] = [
     firstName: 'Noah',
     lastName: 'Kim',
     email: 'noah.staff@coastaleats.com',
+    desiredWeeklyHours: 30,
     maxHoursPerWeek: 35,
     hourlyRate: 19.25,
     certifications: ['LA_PIER'],
@@ -73,6 +76,7 @@ const staffSeedData: StaffSeed[] = [
     firstName: 'Mia',
     lastName: 'Patel',
     email: 'mia.staff@coastaleats.com',
+    desiredWeeklyHours: 28,
     maxHoursPerWeek: 32,
     hourlyRate: 21.75,
     certifications: ['LA_DT', 'LA_PIER'],
@@ -82,6 +86,7 @@ const staffSeedData: StaffSeed[] = [
     firstName: 'Ethan',
     lastName: 'Lopez',
     email: 'ethan.staff@coastaleats.com',
+    desiredWeeklyHours: 36,
     maxHoursPerWeek: 38,
     hourlyRate: 24.1,
     certifications: ['NYC_MID'],
@@ -91,6 +96,7 @@ const staffSeedData: StaffSeed[] = [
     firstName: 'Olivia',
     lastName: 'Chen',
     email: 'olivia.staff@coastaleats.com',
+    desiredWeeklyHours: 26,
     maxHoursPerWeek: 30,
     hourlyRate: 18.8,
     certifications: ['NYC_BRK'],
@@ -100,6 +106,7 @@ const staffSeedData: StaffSeed[] = [
     firstName: 'Liam',
     lastName: 'Wright',
     email: 'liam.staff@coastaleats.com',
+    desiredWeeklyHours: 34,
     maxHoursPerWeek: 36,
     hourlyRate: 22.4,
     certifications: ['LA_DT'],
@@ -109,6 +116,7 @@ const staffSeedData: StaffSeed[] = [
     firstName: 'Sophia',
     lastName: 'Garcia',
     email: 'sophia.staff@coastaleats.com',
+    desiredWeeklyHours: 32,
     maxHoursPerWeek: 34,
     hourlyRate: 20.9,
     certifications: ['NYC_MID', 'LA_DT'],
@@ -118,6 +126,7 @@ const staffSeedData: StaffSeed[] = [
     firstName: 'Mason',
     lastName: 'Reed',
     email: 'mason.staff@coastaleats.com',
+    desiredWeeklyHours: 36,
     maxHoursPerWeek: 40,
     hourlyRate: 19.9,
     certifications: ['LA_PIER', 'LA_DT'],
@@ -127,6 +136,7 @@ const staffSeedData: StaffSeed[] = [
     firstName: 'Isabella',
     lastName: 'Scott',
     email: 'isabella.staff@coastaleats.com',
+    desiredWeeklyHours: 24,
     maxHoursPerWeek: 28,
     hourlyRate: 21.1,
     certifications: ['NYC_BRK', 'NYC_MID'],
@@ -136,6 +146,7 @@ const staffSeedData: StaffSeed[] = [
     firstName: 'James',
     lastName: 'Torres',
     email: 'james.staff@coastaleats.com',
+    desiredWeeklyHours: 36,
     maxHoursPerWeek: 40,
     hourlyRate: 22.95,
     certifications: ['LA_PIER'],
@@ -145,6 +156,7 @@ const staffSeedData: StaffSeed[] = [
     firstName: 'Charlotte',
     lastName: 'Hill',
     email: 'charlotte.staff@coastaleats.com',
+    desiredWeeklyHours: 22,
     maxHoursPerWeek: 26,
     hourlyRate: 18.35,
     certifications: ['NYC_BRK'],
@@ -154,6 +166,7 @@ const staffSeedData: StaffSeed[] = [
     firstName: 'Benjamin',
     lastName: 'Price',
     email: 'benjamin.staff@coastaleats.com',
+    desiredWeeklyHours: 34,
     maxHoursPerWeek: 37,
     hourlyRate: 24.5,
     certifications: ['LA_DT', 'NYC_MID'],
@@ -287,6 +300,7 @@ const seed = async () => {
   await StaffProfileModel.insertMany(
     staffUsers.map((user, index) => ({
       userId: user._id,
+      desiredWeeklyHours: staffSeedData[index].desiredWeeklyHours ?? staffSeedData[index].maxHoursPerWeek,
       maxHoursPerWeek: staffSeedData[index].maxHoursPerWeek,
       hourlyRate: staffSeedData[index].hourlyRate,
       notes: `Primary skills: ${staffSeedData[index].skills.join(', ')}`,
@@ -464,6 +478,26 @@ const seed = async () => {
 
   addShift({
     locationCode: 'NYC_BRK',
+    title: 'Friday Premium Close',
+    requiredSkill: 'closing',
+    localDate: nyDates[4],
+    startLocalTime: '18:00',
+    endLocalTime: '22:00',
+    published: true,
+  });
+
+  addShift({
+    locationCode: 'NYC_BRK',
+    title: 'Saturday Premium Close',
+    requiredSkill: 'closing',
+    localDate: nyDates[5],
+    startLocalTime: '18:00',
+    endLocalTime: '22:00',
+    published: true,
+  });
+
+  addShift({
+    locationCode: 'NYC_BRK',
     title: 'Overnight Cleanup',
     requiredSkill: 'closing',
     localDate: nyDates[5],
@@ -613,6 +647,18 @@ const seed = async () => {
       assignedBy: managers[1]._id,
       status: 'assigned' as const,
     },
+    {
+      shiftId: shifts.find((shift) => shift.title === 'Friday Premium Close')!._id,
+      staffId: staffUsers[0]._id,
+      assignedBy: managers[1]._id,
+      status: 'assigned' as const,
+    },
+    {
+      shiftId: shifts.find((shift) => shift.title === 'Saturday Premium Close')!._id,
+      staffId: staffUsers[0]._id,
+      assignedBy: managers[1]._id,
+      status: 'assigned' as const,
+    },
   ];
 
   await ShiftAssignmentModel.insertMany(assignments);
@@ -680,6 +726,7 @@ const seed = async () => {
   ]);
 
   await AuditLogModel.create({
+    actorId: admin._id.toString(),
     actorUserId: admin._id,
     action: 'seed_database',
     entityType: 'system',
@@ -722,6 +769,7 @@ const seed = async () => {
   console.log('- 12x4h assignments + 1 extra 4h shift create a 52h risk scenario');
   console.log('- overlapping conflict candidate shifts exist in LA for double-booking checks');
   console.log('- explicit validation demo shifts seeded for unavailable, skill, certification, overlap, and rest constraints');
+  console.log('- premium fairness demo seeded with Friday/Saturday evening premium shifts concentrated on one staff');
   console.log('- Regret Swap demo seeded as accepted swap awaiting manager approval');
   console.log('- Sunday Night Chaos demo seeded with a near-term drop request for live coverage pickup');
 

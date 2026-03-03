@@ -6,11 +6,13 @@ import {
   AssignmentValidationResponse,
   CurrentUser,
   ShiftItem,
+  ShiftAuditItem,
   StaffOption,
   SwapRequestItem,
   approveSwapRequest,
   assignStaff,
   createShift as createShiftRequest,
+  getShiftAudit,
   listShifts,
   listStaff,
   listSwapRequests,
@@ -156,6 +158,10 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
   const [selectedStaffId, setSelectedStaffId] = useState<string>('');
   const [overrideReason, setOverrideReason] = useState('');
   const [validation, setValidation] = useState<AssignmentValidationResponse | null>(null);
+  const [activeShiftPanel, setActiveShiftPanel] = useState<'assign' | 'history'>('assign');
+  const [shiftAudit, setShiftAudit] = useState<ShiftAuditItem[]>([]);
+  const [shiftAuditLoading, setShiftAuditLoading] = useState(false);
+  const [shiftAuditError, setShiftAuditError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [staffLoading, setStaffLoading] = useState(false);
   const [validating, setValidating] = useState(false);
@@ -267,6 +273,27 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
     }
   }, [locationId]);
 
+  const loadShiftAudit = useCallback(async () => {
+    if (!selectedShiftId) {
+      setShiftAudit([]);
+      setShiftAuditError(null);
+      return;
+    }
+
+    setShiftAuditLoading(true);
+    setShiftAuditError(null);
+
+    try {
+      const payload = await getShiftAudit(selectedShiftId, 50);
+      setShiftAudit(payload.logs ?? []);
+    } catch (auditError) {
+      setShiftAuditError(getErrorMessage(auditError, 'Failed to load shift history'));
+      setShiftAudit([]);
+    } finally {
+      setShiftAuditLoading(false);
+    }
+  }, [selectedShiftId]);
+
   const runValidation = useCallback(async () => {
     if (!selectedShiftId || !selectedStaffId) {
       setValidation(null);
@@ -306,6 +333,12 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
   useEffect(() => {
     void runValidation();
   }, [runValidation]);
+
+  useEffect(() => {
+    if (activeShiftPanel === 'history') {
+      void loadShiftAudit();
+    }
+  }, [activeShiftPanel, loadShiftAudit]);
 
   useEffect(() => {
     if (!realtimeBanner) {
@@ -358,6 +391,9 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
 
       void loadShifts();
       void loadSwapInbox();
+      if (activeShiftPanel === 'history') {
+        void loadShiftAudit();
+      }
     };
 
     socket.on('conflict_detected', handleConflictDetected);
@@ -383,7 +419,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
       socket.off('swap_updated', handleLocationRefreshEvent);
       socket.off('swap_cancelled', handleLocationRefreshEvent);
     };
-  }, [locationId, loadShifts, loadSwapInbox]);
+  }, [activeShiftPanel, loadShiftAudit, locationId, loadShifts, loadSwapInbox]);
 
   const createShift = async () => {
     if (!locationId) {
@@ -504,6 +540,9 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
             <Link href="/overtime" className="inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm">
               View Overtime Dashboard
             </Link>
+            <Link href="/fairness" className="inline-flex rounded-md border border-slate-300 px-3 py-2 text-sm">
+              View Fairness Analytics
+            </Link>
           </div>
 
           <label>
@@ -516,6 +555,9 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                 setSelectedStaffId('');
                 setValidation(null);
                 setOverrideReason('');
+                setActiveShiftPanel('assign');
+                setShiftAudit([]);
+                setShiftAuditError(null);
               }}
             >
               {locations.map((location) => (
@@ -576,6 +618,9 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                   setValidation(null);
                   setAssignmentMessage(null);
                   setOverrideReason('');
+                  setActiveShiftPanel('assign');
+                  setShiftAudit([]);
+                  setShiftAuditError(null);
                 }}
               >
                 <div className="flex items-center justify-between">
@@ -623,136 +668,204 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                   </p>
                 </div>
 
-                <div>
-                  <label>
-                    <span className="mb-1 block text-xs text-slate-500">Assign staff</span>
-                    <select
-                      className="input"
-                      value={selectedStaffId}
-                      onChange={(event) => {
-                        setSelectedStaffId(event.target.value);
-                        setValidation(null);
-                        setAssignmentMessage(null);
-                        setOverrideReason('');
-                      }}
-                    >
-                      <option value="">Select staff member...</option>
-                      {staffOptions.map((staff) => (
-                        <option key={staff.id} value={staff.id}>
-                          {staff.name} ({staff.email})
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {staffLoading ? <p className="mt-2 text-xs text-slate-500">Loading staff...</p> : null}
-                  {selectedStaff ? (
-                    <p className="mt-2 text-xs text-slate-500">
-                      Skills: {selectedStaff.skills.join(', ') || 'none'}
-                    </p>
-                  ) : null}
+                <div className="inline-flex rounded-md border border-slate-200 p-1 text-xs">
+                  <button
+                    className={`rounded px-3 py-1 ${
+                      activeShiftPanel === 'assign' ? 'bg-cyan-100 text-cyan-800' : 'text-slate-600'
+                    }`}
+                    onClick={() => setActiveShiftPanel('assign')}
+                  >
+                    Assign
+                  </button>
+                  <button
+                    className={`rounded px-3 py-1 ${
+                      activeShiftPanel === 'history' ? 'bg-cyan-100 text-cyan-800' : 'text-slate-600'
+                    }`}
+                    onClick={() => setActiveShiftPanel('history')}
+                  >
+                    History
+                  </button>
                 </div>
 
-                <div className="space-y-2">
-                  {validating ? <p className="text-xs text-slate-500">Validating constraints...</p> : null}
-
-                  {validation?.ok ? (
-                    <p className="rounded-md bg-green-100 p-2 text-xs text-green-700">
-                      No hard blocks. You can assign this staff member.
-                    </p>
-                  ) : null}
-
-                  {hardBlocks.length > 0 ? (
-                    <div className="rounded-md border border-red-200 bg-red-50 p-2">
-                      <p className="mb-2 text-xs font-semibold text-red-700">Hard blocks</p>
-                      <ul className="space-y-1 text-xs text-red-700">
-                        {hardBlocks.map((violation, index) => (
-                          <li key={`${violation.code}-${index}`}>- {violation.message}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-
-                  {validation ? (
-                    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-xs font-semibold text-slate-700">Compliance what-if impact</p>
-                      <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-700">
-                        <p>
-                          Weekly Hours: <span className="font-semibold">{validation.complianceImpact.projectedWeeklyHours}</span>
-                        </p>
-                        <p>
-                          Shift-Day Hours: <span className="font-semibold">{validation.complianceImpact.projectedDailyHours}</span>
-                        </p>
-                        <p>
-                          Consecutive Days: <span className="font-semibold">{validation.complianceImpact.consecutiveDaysAfterAssignment}</span>
-                        </p>
-                      </div>
-
-                      <div className="mt-2 space-y-2">
-                        {validation.complianceImpact.warnings.map((warning, index) => (
-                          <p
-                            key={`${warning.code}-${index}`}
-                            className={`rounded-md border p-2 text-xs ${complianceWarningTone(warning.code)}`}
-                          >
-                            {warning.message}
-                          </p>
-                        ))}
-                        {validation.complianceImpact.warnings.length === 0 ? (
-                          <p className="text-xs text-slate-500">No compliance warnings for this assignment.</p>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {seventhDayBlock && otherHardBlocks.length === 0 ? (
-                    <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
-                      <p className="text-xs font-semibold text-blue-800">
-                        Seventh consecutive day requires manager override.
-                      </p>
-                      <label className="mt-2 block">
-                        <span className="mb-1 block text-xs text-blue-700">Override reason (required)</span>
-                        <textarea
-                          className="input min-h-20 text-xs"
-                          value={overrideReason}
-                          onChange={(event) => setOverrideReason(event.target.value)}
-                          placeholder="Document why this 7th consecutive day assignment is allowed"
-                        />
+                {activeShiftPanel === 'assign' ? (
+                  <>
+                    <div>
+                      <label>
+                        <span className="mb-1 block text-xs text-slate-500">Assign staff</span>
+                        <select
+                          className="input"
+                          value={selectedStaffId}
+                          onChange={(event) => {
+                            setSelectedStaffId(event.target.value);
+                            setValidation(null);
+                            setAssignmentMessage(null);
+                            setOverrideReason('');
+                          }}
+                        >
+                          <option value="">Select staff member...</option>
+                          {staffOptions.map((staff) => (
+                            <option key={staff.id} value={staff.id}>
+                              {staff.name} ({staff.email})
+                            </option>
+                          ))}
+                        </select>
                       </label>
+                      {staffLoading ? <p className="mt-2 text-xs text-slate-500">Loading staff...</p> : null}
+                      {selectedStaff ? (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Skills: {selectedStaff.skills.join(', ') || 'none'}
+                        </p>
+                      ) : null}
                     </div>
-                  ) : null}
 
-                  {!validation?.ok && validation?.suggestions?.length ? (
-                    <div className="rounded-md bg-slate-100 p-2">
-                      <p className="mb-2 text-xs font-semibold text-slate-700">Suggested alternatives</p>
-                      <div className="space-y-1">
-                        {validation.suggestions.map((suggestion) => (
-                          <button
-                            key={suggestion.staffId}
-                            className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-left text-xs hover:bg-slate-50"
-                            onClick={() => {
-                              setSelectedStaffId(suggestion.staffId);
-                              setOverrideReason('');
-                            }}
-                          >
-                            <span className="font-semibold">{suggestion.name}</span>
-                            <span className="block text-slate-600">{suggestion.reason}</span>
-                          </button>
-                        ))}
-                      </div>
+                    <div className="space-y-2">
+                      {validating ? <p className="text-xs text-slate-500">Validating constraints...</p> : null}
+
+                      {validation?.ok ? (
+                        <p className="rounded-md bg-green-100 p-2 text-xs text-green-700">
+                          No hard blocks. You can assign this staff member.
+                        </p>
+                      ) : null}
+
+                      {hardBlocks.length > 0 ? (
+                        <div className="rounded-md border border-red-200 bg-red-50 p-2">
+                          <p className="mb-2 text-xs font-semibold text-red-700">Hard blocks</p>
+                          <ul className="space-y-1 text-xs text-red-700">
+                            {hardBlocks.map((violation, index) => (
+                              <li key={`${violation.code}-${index}`}>- {violation.message}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {validation ? (
+                        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-xs font-semibold text-slate-700">Compliance what-if impact</p>
+                          <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-700">
+                            <p>
+                              Weekly Hours:{' '}
+                              <span className="font-semibold">{validation.complianceImpact.projectedWeeklyHours}</span>
+                            </p>
+                            <p>
+                              Shift-Day Hours:{' '}
+                              <span className="font-semibold">{validation.complianceImpact.projectedDailyHours}</span>
+                            </p>
+                            <p>
+                              Consecutive Days:{' '}
+                              <span className="font-semibold">
+                                {validation.complianceImpact.consecutiveDaysAfterAssignment}
+                              </span>
+                            </p>
+                          </div>
+
+                          <div className="mt-2 space-y-2">
+                            {validation.complianceImpact.warnings.map((warning, index) => (
+                              <p
+                                key={`${warning.code}-${index}`}
+                                className={`rounded-md border p-2 text-xs ${complianceWarningTone(warning.code)}`}
+                              >
+                                {warning.message}
+                              </p>
+                            ))}
+                            {validation.complianceImpact.warnings.length === 0 ? (
+                              <p className="text-xs text-slate-500">No compliance warnings for this assignment.</p>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {seventhDayBlock && otherHardBlocks.length === 0 ? (
+                        <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
+                          <p className="text-xs font-semibold text-blue-800">
+                            Seventh consecutive day requires manager override.
+                          </p>
+                          <label className="mt-2 block">
+                            <span className="mb-1 block text-xs text-blue-700">Override reason (required)</span>
+                            <textarea
+                              className="input min-h-20 text-xs"
+                              value={overrideReason}
+                              onChange={(event) => setOverrideReason(event.target.value)}
+                              placeholder="Document why this 7th consecutive day assignment is allowed"
+                            />
+                          </label>
+                        </div>
+                      ) : null}
+
+                      {!validation?.ok && validation?.suggestions?.length ? (
+                        <div className="rounded-md bg-slate-100 p-2">
+                          <p className="mb-2 text-xs font-semibold text-slate-700">Suggested alternatives</p>
+                          <div className="space-y-1">
+                            {validation.suggestions.map((suggestion) => (
+                              <button
+                                key={suggestion.staffId}
+                                className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-left text-xs hover:bg-slate-50"
+                                onClick={() => {
+                                  setSelectedStaffId(suggestion.staffId);
+                                  setOverrideReason('');
+                                }}
+                              >
+                                <span className="font-semibold">{suggestion.name}</span>
+                                <span className="block text-slate-600">{suggestion.reason}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {assignmentMessage ? (
+                        <p className="rounded-md bg-green-100 p-2 text-xs text-green-700">{assignmentMessage}</p>
+                      ) : null}
                     </div>
-                  ) : null}
 
-                  {assignmentMessage ? (
-                    <p className="rounded-md bg-green-100 p-2 text-xs text-green-700">{assignmentMessage}</p>
-                  ) : null}
-                </div>
-
-                <button className="btn-primary w-full" disabled={!canAssign} onClick={() => void assignSelectedStaff()}>
-                  {assigning
-                    ? 'Assigning...'
-                    : canAssignWithOverride
-                      ? 'Confirm Assign with Override'
-                      : 'Confirm Assign'}
-                </button>
+                    <button
+                      className="btn-primary w-full"
+                      disabled={!canAssign}
+                      onClick={() => void assignSelectedStaff()}
+                    >
+                      {assigning
+                        ? 'Assigning...'
+                        : canAssignWithOverride
+                          ? 'Confirm Assign with Override'
+                          : 'Confirm Assign'}
+                    </button>
+                  </>
+                ) : (
+                  <div className="space-y-2">
+                    <button
+                      className="rounded-md border border-slate-300 px-3 py-1 text-xs text-slate-700"
+                      onClick={() => void loadShiftAudit()}
+                    >
+                      Refresh History
+                    </button>
+                    {shiftAuditLoading ? <p className="text-xs text-slate-500">Loading shift history...</p> : null}
+                    {shiftAuditError ? <p className="text-xs text-red-600">{shiftAuditError}</p> : null}
+                    <ul className="space-y-2">
+                      {shiftAudit.map((entry) => (
+                        <li key={entry._id} className="rounded-md border border-slate-200 p-2 text-xs">
+                          <p className="font-semibold text-slate-800">{entry.action}</p>
+                          <p className="text-slate-500">
+                            {new Date(entry.createdAt).toLocaleString()} by {entry.actorName ?? entry.actorId}
+                          </p>
+                          {entry.beforeSnapshot ? (
+                            <pre className="mt-1 overflow-auto rounded bg-slate-50 p-2 text-[11px] text-slate-700">
+                              before: {JSON.stringify(entry.beforeSnapshot)}
+                            </pre>
+                          ) : null}
+                          {entry.afterSnapshot ? (
+                            <pre className="mt-1 overflow-auto rounded bg-slate-50 p-2 text-[11px] text-slate-700">
+                              after: {JSON.stringify(entry.afterSnapshot)}
+                            </pre>
+                          ) : null}
+                        </li>
+                      ))}
+                      {!shiftAuditLoading && shiftAudit.length === 0 ? (
+                        <li className="rounded-md border border-dashed border-slate-300 p-2 text-xs text-slate-500">
+                          No history entries found for this shift.
+                        </li>
+                      ) : null}
+                    </ul>
+                  </div>
+                )}
               </div>
             )}
           </section>

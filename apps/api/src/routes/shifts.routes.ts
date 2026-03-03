@@ -15,6 +15,7 @@ import {
   UserModel,
 } from '../models/index.js';
 import { canManageLocation, getStaffCertifiedLocationIds } from '../services/access.service.js';
+import { recordAuditLog } from '../services/audit.service.js';
 import { validateAssignment } from '../services/assignmentValidator.js';
 import {
   acquireReservationLock,
@@ -73,6 +74,14 @@ const patchShiftSchema = z.object({
 const shiftIdSchema = z.object({
   query: z.object({}).optional().default({}),
   body: z.object({}).optional().default({}),
+  params: z.object({ id: z.string().min(1) }),
+});
+
+const shiftAuditSchema = z.object({
+  body: z.object({}).optional().default({}),
+  query: z.object({
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+  }),
   params: z.object({ id: z.string().min(1) }),
 });
 
@@ -402,6 +411,93 @@ shiftsRouter.get(
   },
 );
 
+shiftsRouter.get(
+  '/:id/audit',
+  authenticateJwt,
+  requireRoles('admin', 'manager'),
+  validateRequest(shiftAuditSchema),
+  async (req: AuthenticatedRequest, res) => {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
+    }
+
+    const shiftObjectId = parseObjectId(req.params.id);
+    if (!shiftObjectId) {
+      res.status(400).json({ code: 'invalid_shift_id', message: 'Invalid shift id' });
+      return;
+    }
+
+    const shift = await ShiftModel.findById(shiftObjectId)
+      .select('_id locationId title localDate startLocalTime endLocalTime')
+      .lean();
+    if (!shift) {
+      res.status(404).json({ code: 'shift_not_found', message: 'Shift not found' });
+      return;
+    }
+
+    if (user.role === 'manager') {
+      const allowed = await canManageLocation(user, shift.locationId.toString());
+      if (!allowed) {
+        res.status(403).json({ code: 'forbidden', message: 'Cannot view audit history for this shift' });
+        return;
+      }
+    }
+
+    const limit =
+      typeof req.query.limit === 'number' && Number.isFinite(req.query.limit) ? req.query.limit : 50;
+
+    const logs = await AuditLogModel.find({
+      $or: [
+        { entityType: 'shift', entityId: shift._id.toString() },
+        { 'payload.shiftId': shift._id.toString() },
+      ],
+    })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .select(
+        '_id createdAt actorId actorUserId action entityType entityId locationId beforeSnapshot afterSnapshot payload',
+      )
+      .lean();
+
+    const actorIds = Array.from(
+      new Set(logs.map((log) => log.actorUserId?.toString()).filter((entry): entry is string => Boolean(entry))),
+    ).map((id) => new Types.ObjectId(id));
+    const actors =
+      actorIds.length > 0
+        ? await UserModel.find({ _id: { $in: actorIds } }).select('_id firstName lastName').lean()
+        : [];
+    const actorNameById = new Map(
+      actors.map((actor) => [actor._id.toString(), `${actor.firstName} ${actor.lastName}`]),
+    );
+
+    res.json({
+      shift: {
+        _id: shift._id.toString(),
+        locationId: shift.locationId.toString(),
+        title: shift.title,
+        localDate: shift.localDate,
+        startLocalTime: shift.startLocalTime,
+        endLocalTime: shift.endLocalTime,
+      },
+      logs: logs.map((log) => ({
+        _id: log._id.toString(),
+        createdAt: log.createdAt.toISOString(),
+        actorId: log.actorId,
+        actorName: log.actorUserId ? actorNameById.get(log.actorUserId.toString()) ?? null : null,
+        action: log.action,
+        entityType: log.entityType,
+        entityId: log.entityId,
+        locationId: log.locationId?.toString() ?? null,
+        beforeSnapshot: log.beforeSnapshot ?? null,
+        afterSnapshot: log.afterSnapshot ?? null,
+        payload: log.payload ?? null,
+      })),
+    });
+  },
+);
+
 shiftsRouter.post(
   '/',
   authenticateJwt,
@@ -462,6 +558,31 @@ shiftsRouter.post(
       updatedBy: new Types.ObjectId(user.userId),
     });
 
+    await recordAuditLog({
+      actorId: user.userId,
+      action: 'shift_created',
+      entityType: 'shift',
+      entityId: created._id.toString(),
+      locationId: created.locationId,
+      beforeSnapshot: null,
+      afterSnapshot: {
+        title: created.title,
+        requiredSkill: created.requiredSkill ?? null,
+        timezone: created.timezone,
+        localDate: created.localDate,
+        startLocalTime: created.startLocalTime,
+        endLocalTime: created.endLocalTime,
+        startAtUtc: created.startAtUtc,
+        endAtUtc: created.endAtUtc,
+        overnight: created.overnight,
+        weekStartLocal: created.weekStartLocal,
+        published: created.published,
+      },
+      payload: {
+        shiftId: created._id.toString(),
+      },
+    });
+
     const io = req.app.get('io');
     if (io) {
       io.to(`location:${locationObjectId.toString()}`).emit('shift_created', {
@@ -515,6 +636,20 @@ shiftsRouter.patch(
       });
       return;
     }
+
+    const shiftBeforeSnapshot = {
+      title: shift.title,
+      requiredSkill: shift.requiredSkill ?? null,
+      timezone: shift.timezone,
+      localDate: shift.localDate,
+      startLocalTime: shift.startLocalTime,
+      endLocalTime: shift.endLocalTime,
+      startAtUtc: shift.startAtUtc,
+      endAtUtc: shift.endAtUtc,
+      overnight: shift.overnight,
+      weekStartLocal: shift.weekStartLocal,
+      published: shift.published,
+    };
 
     const nextLocalDate = req.body.localDate ?? shift.localDate;
     const nextStart = req.body.startLocalTime ?? shift.startLocalTime;
@@ -586,6 +721,53 @@ shiftsRouter.patch(
     }
 
     if (updated) {
+      await recordAuditLog({
+        actorId: user.userId,
+        action: 'shift_updated',
+        entityType: 'shift',
+        entityId: updated._id.toString(),
+        locationId: updated.locationId,
+        beforeSnapshot: shiftBeforeSnapshot,
+        afterSnapshot: {
+          title: updated.title,
+          requiredSkill: req.body.requiredSkill ?? shift.requiredSkill ?? null,
+          timezone: shift.timezone,
+          localDate: updated.localDate,
+          startLocalTime: updated.startLocalTime,
+          endLocalTime: updated.endLocalTime,
+          startAtUtc: updated.startAtUtc,
+          endAtUtc: utcWindow.endAtUtc,
+          overnight: utcWindow.overnight,
+          weekStartLocal: updated.weekStartLocal,
+          published: shift.published,
+        },
+        payload: {
+          shiftId: updated._id.toString(),
+          cancelledSwapRequestCount: cancelledSwapRequests.length,
+        },
+      });
+
+      for (const cancelled of cancelledSwapRequests) {
+        await recordAuditLog({
+          actorId: user.userId,
+          action: 'swap_request_cancelled_due_to_shift_edit',
+          entityType: 'swap_request',
+          entityId: cancelled._id.toString(),
+          locationId: updated.locationId,
+          beforeSnapshot: {
+            status: 'active',
+          },
+          afterSnapshot: {
+            status: 'cancelled',
+            note: swapCancelReason,
+          },
+          payload: {
+            shiftId: updated._id.toString(),
+            reason: swapCancelReason,
+          },
+        });
+      }
+
       const io = req.app.get('io');
       if (io) {
         io.to(`location:${updated.locationId.toString()}`).emit('shift_updated', {
@@ -701,6 +883,13 @@ shiftsRouter.post(
       }
     }
 
+    const shiftsBeforePublish = await ShiftModel.find({
+      locationId: sourceShift.locationId,
+      weekStartLocal: sourceShift.weekStartLocal,
+    })
+      .select('_id title localDate startLocalTime endLocalTime startAtUtc endAtUtc published weekStartLocal')
+      .lean();
+
     // TODO: If future publish includes implicit edits, cancel pending swaps and notify affected staff.
     const result = await ShiftModel.updateMany(
       {
@@ -714,6 +903,52 @@ shiftsRouter.post(
         },
       },
     );
+
+    const shiftsAfterPublish = await ShiftModel.find({
+      _id: { $in: shiftsBeforePublish.map((shift) => shift._id) },
+    })
+      .select('_id title localDate startLocalTime endLocalTime startAtUtc endAtUtc published weekStartLocal')
+      .lean();
+    const afterById = new Map(shiftsAfterPublish.map((shift) => [shift._id.toString(), shift]));
+
+    for (const beforeShift of shiftsBeforePublish) {
+      const afterShift = afterById.get(beforeShift._id.toString());
+      if (!afterShift || beforeShift.published === afterShift.published) {
+        continue;
+      }
+
+      await recordAuditLog({
+        actorId: user.userId,
+        action: 'shift_published',
+        entityType: 'shift',
+        entityId: beforeShift._id.toString(),
+        locationId: sourceShift.locationId,
+        beforeSnapshot: {
+          title: beforeShift.title,
+          localDate: beforeShift.localDate,
+          startLocalTime: beforeShift.startLocalTime,
+          endLocalTime: beforeShift.endLocalTime,
+          startAtUtc: beforeShift.startAtUtc,
+          endAtUtc: beforeShift.endAtUtc,
+          published: beforeShift.published,
+          weekStartLocal: beforeShift.weekStartLocal,
+        },
+        afterSnapshot: {
+          title: afterShift.title,
+          localDate: afterShift.localDate,
+          startLocalTime: afterShift.startLocalTime,
+          endLocalTime: afterShift.endLocalTime,
+          startAtUtc: afterShift.startAtUtc,
+          endAtUtc: afterShift.endAtUtc,
+          published: afterShift.published,
+          weekStartLocal: afterShift.weekStartLocal,
+        },
+        payload: {
+          shiftId: beforeShift._id.toString(),
+          weekStartLocal: sourceShift.weekStartLocal,
+        },
+      });
+    }
 
     await emitScheduleEvent(req, 'schedule_published', {
       locationId: sourceShift.locationId.toString(),
@@ -769,9 +1004,42 @@ shiftsRouter.post(
       return;
     }
 
+    const beforeSnapshot = {
+      title: shift.title,
+      localDate: shift.localDate,
+      startLocalTime: shift.startLocalTime,
+      endLocalTime: shift.endLocalTime,
+      startAtUtc: shift.startAtUtc,
+      endAtUtc: shift.endAtUtc,
+      published: shift.published,
+      weekStartLocal: shift.weekStartLocal,
+    };
+
     shift.published = false;
     shift.updatedBy = new Types.ObjectId(user.userId);
     await shift.save();
+
+    await recordAuditLog({
+      actorId: user.userId,
+      action: 'shift_unpublished',
+      entityType: 'shift',
+      entityId: shift._id.toString(),
+      locationId: shift.locationId,
+      beforeSnapshot,
+      afterSnapshot: {
+        title: shift.title,
+        localDate: shift.localDate,
+        startLocalTime: shift.startLocalTime,
+        endLocalTime: shift.endLocalTime,
+        startAtUtc: shift.startAtUtc,
+        endAtUtc: shift.endAtUtc,
+        published: shift.published,
+        weekStartLocal: shift.weekStartLocal,
+      },
+      payload: {
+        shiftId: shift._id.toString(),
+      },
+    });
 
     const io = req.app.get('io');
     if (io) {
@@ -979,23 +1247,48 @@ shiftsRouter.post(
           simulateEmailAsync: false,
         });
 
+        await recordAuditLog({
+          actorId: user.userId,
+          action: 'assignment_created',
+          entityType: 'shift_assignment',
+          entityId: assignment._id.toString(),
+          locationId: shift.locationId,
+          beforeSnapshot: null,
+          afterSnapshot: {
+            shiftId: assignment.shiftId.toString(),
+            staffId: assignment.staffId.toString(),
+            assignedBy: assignment.assignedBy.toString(),
+            status: assignment.status,
+            overrideReason: assignment.overrideReason ?? null,
+          },
+          payload: {
+            shiftId: shiftObjectId.toString(),
+            staffId: staffObjectId.toString(),
+            overrideApplied: Boolean(overridePayload?.allowSeventhDay),
+          },
+          session,
+        });
+
         if (overridePayload?.allowSeventhDay && overridePayload.reason) {
-          await AuditLogModel.create(
-            [
-              {
-                actorUserId: new Types.ObjectId(user.userId),
-                action: 'assignment_override_seventh_day',
-                entityType: 'shift_assignment',
-                entityId: createdAssignments[0]._id.toString(),
-                payload: {
-                  shiftId: shiftObjectId.toString(),
-                  staffId: staffObjectId.toString(),
-                  reason: overridePayload.reason,
-                },
-              },
-            ],
-            { session },
-          );
+          await recordAuditLog({
+            actorId: user.userId,
+            action: 'assignment_override_seventh_day',
+            entityType: 'shift_assignment',
+            entityId: assignment._id.toString(),
+            locationId: shift.locationId,
+            beforeSnapshot: {
+              overrideReason: null,
+            },
+            afterSnapshot: {
+              overrideReason: overridePayload.reason,
+            },
+            payload: {
+              shiftId: shiftObjectId.toString(),
+              staffId: staffObjectId.toString(),
+              reason: overridePayload.reason,
+            },
+            session,
+          });
         }
 
         persistedAssignment = {
@@ -1160,6 +1453,25 @@ shiftsRouter.delete(
       res.status(404).json({ message: 'Assignment not found' });
       return;
     }
+
+    await recordAuditLog({
+      actorId: user.userId,
+      action: 'assignment_removed',
+      entityType: 'shift_assignment',
+      entityId: assignmentObjectId.toString(),
+      locationId: shift.locationId,
+      beforeSnapshot: {
+        shiftId: assignment.shiftId.toString(),
+        staffId: assignment.staffId.toString(),
+        assignedBy: assignment.assignedBy.toString(),
+        status: assignment.status,
+      },
+      afterSnapshot: null,
+      payload: {
+        shiftId: shiftObjectId.toString(),
+        staffId: assignment.staffId.toString(),
+      },
+    });
 
     const io = req.app.get('io');
     if (io) {

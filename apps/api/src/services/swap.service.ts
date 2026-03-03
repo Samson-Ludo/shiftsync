@@ -14,6 +14,7 @@ import {
   PersistedNotification,
   simulateEmailForNotifications,
 } from './notification.service.js';
+import { recordAuditLog } from './audit.service.js';
 
 export const ACTIVE_SWAP_REQUEST_STATUSES: SwapRequestDoc['status'][] = ['pending', 'accepted', 'claimed'];
 export const APPROVAL_READY_SWAP_STATUSES: SwapRequestDoc['status'][] = ['accepted', 'claimed'];
@@ -436,6 +437,35 @@ export const expireDropRequests = async (args: {
     if (!updated) {
       continue;
     }
+
+    await recordAuditLog({
+      actorId,
+      action: 'swap_request_expired',
+      entityType: 'swap_request',
+      entityId: updated._id.toString(),
+      locationId: shift.locationId,
+      beforeSnapshot: {
+        type: request.type,
+        status: request.status,
+        shiftId: request.shiftId.toString(),
+        fromStaffId: request.fromStaffId.toString(),
+        toStaffId: request.toStaffId?.toString() ?? null,
+        note: request.note ?? null,
+        expiresAtUtc: request.expiresAtUtc.toISOString(),
+      },
+      afterSnapshot: {
+        type: updated.type,
+        status: updated.status,
+        shiftId: updated.shiftId.toString(),
+        fromStaffId: updated.fromStaffId.toString(),
+        toStaffId: updated.toStaffId?.toString() ?? null,
+        note: updated.note ?? null,
+        expiresAtUtc: updated.expiresAtUtc.toISOString(),
+      },
+      payload: {
+        shiftId: shift._id.toString(),
+      },
+    });
 
     expiredCount += 1;
 

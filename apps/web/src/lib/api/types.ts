@@ -227,6 +227,70 @@ export type OvertimeReportResponse = {
   };
 };
 
+export type FairnessStaffRow = {
+  staffId: string;
+  staffName: string;
+  desiredWeeklyHours: number;
+  desiredHoursForPeriod: number;
+  assignedHours: number;
+  deltaHours: number;
+  premiumShiftCount: number;
+  premiumBalanceScore: number;
+  hoursBalanceScore: number;
+  fairnessScore: number;
+  scheduleBalance: 'over_scheduled' | 'under_scheduled' | 'balanced';
+};
+
+export type FairnessReportResponse = {
+  location: LocationSummary;
+  period: {
+    startDate: string;
+    endDate: string;
+    timezone: string;
+    days: number;
+  };
+  premiumDefinition: string;
+  fairnessScoring: {
+    perStaffFormula: string;
+    premiumBalanceScore: string;
+    hoursBalanceScore: string;
+  };
+  overall: {
+    staffCount: number;
+    totalAssignedHours: number;
+    totalPremiumShifts: number;
+    premiumTargetPerStaff: number;
+    overallFairnessScore: number;
+  };
+  staff: FairnessStaffRow[];
+};
+
+export type ShiftAuditItem = {
+  _id: string;
+  createdAt: string;
+  actorId: string;
+  actorName: string | null;
+  action: string;
+  entityType: string;
+  entityId: string;
+  locationId: string | null;
+  beforeSnapshot: Record<string, unknown> | null;
+  afterSnapshot: Record<string, unknown> | null;
+  payload: Record<string, unknown> | null;
+};
+
+export type ShiftAuditResponse = {
+  shift: {
+    _id: string;
+    locationId: string;
+    title: string;
+    localDate: string;
+    startLocalTime: string;
+    endLocalTime: string;
+  };
+  logs: ShiftAuditItem[];
+};
+
 export type StaffOption = {
   id: string;
   firstName: string;

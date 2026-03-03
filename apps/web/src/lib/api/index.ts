@@ -19,9 +19,11 @@ import {
   MeResponse,
   NotificationResponse,
   OnDutyResponse,
+  FairnessReportResponse,
   OvertimeReportResponse,
   PublishShiftResponse,
   ShiftMutationResponse,
+  ShiftAuditResponse,
   SwapRequestResponse,
   UpdateNotificationPreferenceResponse,
   UpdateShiftRequest,
@@ -235,6 +237,31 @@ export const getOvertimeReport = async (
 ): Promise<OvertimeReportResponse> => {
   const { data } = await api.get<OvertimeReportResponse>('/reports/overtime', {
     params: { locationId, weekStart },
+  });
+  return data;
+};
+
+export const getFairnessReport = async (args: {
+  locationId: string;
+  startDate: string;
+  endDate: string;
+}): Promise<FairnessReportResponse> => {
+  const { data } = await api.get<FairnessReportResponse>('/reports/fairness', {
+    params: {
+      locationId: args.locationId,
+      startDate: args.startDate,
+      endDate: args.endDate,
+    },
+  });
+  return data;
+};
+
+export const getShiftAudit = async (
+  shiftId: string,
+  limit = 50,
+): Promise<ShiftAuditResponse> => {
+  const { data } = await api.get<ShiftAuditResponse>(`/shifts/${shiftId}/audit`, {
+    params: { limit },
   });
   return data;
 };
