@@ -6,11 +6,15 @@ import {
   AssignmentValidationResponse,
   CurrentUser,
   ShiftItem,
+  SwapRequestItem,
   StaffOption,
+  approveSwapRequest,
   assignStaff,
   createShift as createShiftRequest,
   listShifts,
   listStaff,
+  listSwapRequests,
+  rejectSwapRequest,
   validateAssign,
 } from '@/lib/api';
 import { getToken } from '@/lib/api/auth';
@@ -94,6 +98,22 @@ const getErrorMessage = (error: unknown, fallback: string): string => {
   return fallback;
 };
 
+const swapStatusTone = (status: SwapRequestItem['status']): string => {
+  if (status === 'approved') {
+    return 'bg-green-100 text-green-700';
+  }
+
+  if (status === 'rejected' || status === 'cancelled' || status === 'expired') {
+    return 'bg-red-100 text-red-700';
+  }
+
+  if (status === 'accepted' || status === 'claimed') {
+    return 'bg-blue-100 text-blue-700';
+  }
+
+  return 'bg-amber-100 text-amber-700';
+};
+
 export function ManagerDashboard({ user }: { user: CurrentUser }) {
   const locations = useMemo(() => user.managerLocations ?? [], [user.managerLocations]);
   const [locationId, setLocationId] = useState(locations[0]?._id ?? '');
@@ -112,6 +132,11 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
   const [realtimeBanner, setRealtimeBanner] = useState<RealtimeBanner>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createForm, setCreateForm] = useState<CreateFormState>(initialCreateForm);
+  const [swapInbox, setSwapInbox] = useState<SwapRequestItem[]>([]);
+  const [swapInboxLoading, setSwapInboxLoading] = useState(false);
+  const [swapInboxMessage, setSwapInboxMessage] = useState<string | null>(null);
+  const [swapActionRequestId, setSwapActionRequestId] = useState<string | null>(null);
+  const [rejectReasons, setRejectReasons] = useState<Record<string, string>>({});
 
   const selectedLocation = useMemo(
     () => locations.find((location) => location._id === locationId),
@@ -173,6 +198,20 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
     }
   }, [locationId]);
 
+  const loadSwapInbox = useCallback(async () => {
+    setSwapInboxLoading(true);
+
+    try {
+      const payload = await listSwapRequests({ managerInbox: true });
+      const rows = payload.swapRequests ?? [];
+      setSwapInbox(rows.filter((request) => request.shift.locationId === locationId));
+    } catch (loadError) {
+      setError(getErrorMessage(loadError, 'Failed to load manager swap inbox'));
+    } finally {
+      setSwapInboxLoading(false);
+    }
+  }, [locationId]);
+
   const runValidation = useCallback(async () => {
     if (!selectedShiftId || !selectedStaffId) {
       setValidation(null);
@@ -204,6 +243,10 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
   useEffect(() => {
     void loadStaffOptions();
   }, [loadStaffOptions]);
+
+  useEffect(() => {
+    void loadSwapInbox();
+  }, [loadSwapInbox]);
 
   useEffect(() => {
     void runValidation();
@@ -258,6 +301,7 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
       }
 
       void loadShifts();
+      void loadSwapInbox();
     };
 
     socket.on('conflict_detected', handleConflictDetected);
@@ -267,6 +311,9 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
     socket.on('shift_updated', handleLocationRefreshEvent);
     socket.on('schedule_published', handleLocationRefreshEvent);
     socket.on('schedule_updated', handleLocationRefreshEvent);
+    socket.on('swap_requested', handleLocationRefreshEvent);
+    socket.on('swap_updated', handleLocationRefreshEvent);
+    socket.on('swap_cancelled', handleLocationRefreshEvent);
 
     return () => {
       socket.off('conflict_detected', handleConflictDetected);
@@ -276,8 +323,11 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
       socket.off('shift_updated', handleLocationRefreshEvent);
       socket.off('schedule_published', handleLocationRefreshEvent);
       socket.off('schedule_updated', handleLocationRefreshEvent);
+      socket.off('swap_requested', handleLocationRefreshEvent);
+      socket.off('swap_updated', handleLocationRefreshEvent);
+      socket.off('swap_cancelled', handleLocationRefreshEvent);
     };
-  }, [locationId, loadShifts]);
+  }, [locationId, loadShifts, loadSwapInbox]);
 
   const createShift = async () => {
     if (!locationId) {
@@ -324,6 +374,43 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
       setError(getErrorMessage(assignError, 'Unable to assign staff'));
     } finally {
       setAssigning(false);
+    }
+  };
+
+  const approveSwap = async (swapRequestId: string) => {
+    setSwapActionRequestId(swapRequestId);
+    setSwapInboxMessage(null);
+
+    try {
+      await approveSwapRequest(swapRequestId);
+      setSwapInboxMessage('Swap request approved.');
+      await Promise.all([loadSwapInbox(), loadShifts()]);
+    } catch (approveError) {
+      setError(getErrorMessage(approveError, 'Failed to approve swap request'));
+    } finally {
+      setSwapActionRequestId(null);
+    }
+  };
+
+  const rejectSwap = async (swapRequestId: string) => {
+    const reason = rejectReasons[swapRequestId]?.trim();
+    if (!reason) {
+      setError('Reject reason is required.');
+      return;
+    }
+
+    setSwapActionRequestId(swapRequestId);
+    setSwapInboxMessage(null);
+
+    try {
+      await rejectSwapRequest(swapRequestId, reason);
+      setSwapInboxMessage('Swap request rejected.');
+      setRejectReasons((current) => ({ ...current, [swapRequestId]: '' }));
+      await loadSwapInbox();
+    } catch (rejectError) {
+      setError(getErrorMessage(rejectError, 'Failed to reject swap request'));
+    } finally {
+      setSwapActionRequestId(null);
     }
   };
 
@@ -533,6 +620,69 @@ export function ManagerDashboard({ user }: { user: CurrentUser }) {
                 </button>
               </div>
             )}
+          </section>
+
+          <section className="panel p-5">
+            <h2 className="font-[family-name:var(--font-heading)] text-lg font-semibold">
+              Swap / Coverage Inbox
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Requests become actionable after staff acceptance or drop claim.
+            </p>
+            {swapInboxMessage ? (
+              <p className="mt-3 rounded-md bg-green-100 p-2 text-xs text-green-700">{swapInboxMessage}</p>
+            ) : null}
+            {swapInboxLoading ? <p className="mt-3 text-sm text-slate-500">Loading requests...</p> : null}
+            <ul className="mt-3 space-y-3">
+              {swapInbox.map((request) => (
+                <li key={request._id} className="rounded-md border border-slate-200 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium">
+                      {request.type === 'swap' ? 'Swap' : 'Drop'} - {request.shift.title}
+                    </p>
+                    <span className={`rounded-full px-2 py-1 text-xs ${swapStatusTone(request.status)}`}>
+                      {request.status}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-600">
+                    {request.shift.localDate} {request.shift.startLocalTime}-{request.shift.endLocalTime}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    From: {request.fromStaff.name}
+                    {request.toStaff ? ` | To: ${request.toStaff.name}` : ''}
+                  </p>
+                  <textarea
+                    className="input mt-2 min-h-16 text-xs"
+                    placeholder="Reject reason"
+                    value={rejectReasons[request._id] ?? ''}
+                    onChange={(event) =>
+                      setRejectReasons((current) => ({ ...current, [request._id]: event.target.value }))
+                    }
+                  />
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <button
+                      className="rounded-md border border-green-300 bg-green-50 px-3 py-1 text-xs text-green-700"
+                      disabled={swapActionRequestId === request._id}
+                      onClick={() => void approveSwap(request._id)}
+                    >
+                      {swapActionRequestId === request._id ? 'Saving...' : 'Approve'}
+                    </button>
+                    <button
+                      className="rounded-md border border-red-300 bg-red-50 px-3 py-1 text-xs text-red-700"
+                      disabled={swapActionRequestId === request._id}
+                      onClick={() => void rejectSwap(request._id)}
+                    >
+                      {swapActionRequestId === request._id ? 'Saving...' : 'Reject'}
+                    </button>
+                  </div>
+                </li>
+              ))}
+              {!swapInboxLoading && swapInbox.length === 0 ? (
+                <li className="rounded-md border border-dashed border-slate-300 p-3 text-xs text-slate-500">
+                  No pending coverage approvals for this location.
+                </li>
+              ) : null}
+            </ul>
           </section>
           <NotificationCenter />
         </aside>

@@ -6,6 +6,7 @@ import { createApp } from './app.js';
 import { env } from './config/env.js';
 import { connectToDatabase } from './db/mongoose.js';
 import { LocationModel, ManagerLocationModel } from './models/index.js';
+import { expireDropRequests } from './services/swap.service.js';
 
 const start = async () => {
   await connectToDatabase();
@@ -98,6 +99,23 @@ const start = async () => {
   });
 
   app.set('io', io);
+
+  const runSwapExpirySweep = async () => {
+    try {
+      const expiredCount = await expireDropRequests({ io, actorId: 'swap-expiry-worker' });
+      if (expiredCount > 0) {
+        console.log(`[swap-expiry-worker] expired ${expiredCount} drop request(s)`);
+      }
+    } catch (error) {
+      console.error('[swap-expiry-worker] failed', error);
+    }
+  };
+
+  void runSwapExpirySweep();
+  const expiryInterval = setInterval(() => {
+    void runSwapExpirySweep();
+  }, 3 * 60 * 1000);
+  expiryInterval.unref();
 
   server.listen(env.PORT, () => {
     console.log(`ShiftSync API listening on http://localhost:${env.PORT}`);

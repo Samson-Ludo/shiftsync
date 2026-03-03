@@ -87,6 +87,25 @@ Seed script (`apps/api/src/seed.ts`) provides:
 - Overnight shift: `23:00 -> 03:00` next day
 - Hour-risk arrangement: one staff assigned 48h + extra 4h shift available (52h risk)
 - Overlap conflict setup: two LA shifts that overlap for potential double-booking
+- `Regret Swap Demo`: accepted swap request waiting for manager approval
+- `Sunday Night Chaos`: near-term drop request open for claim + manager approval path
+
+## Swap & Coverage Flow
+
+Implemented workflow:
+
+1. Staff member creates a `swap` or `drop` request from an assigned shift.
+2. `swap`: targeted colleague accepts.
+3. `drop`: eligible colleague claims.
+4. Manager/admin approves or rejects.
+5. Original assignment remains unchanged until manager approval commits.
+
+Edge-case handling:
+
+- Manager shift edits cancel all non-final swap/drop requests tied to the edited shift.
+- Staff may have at most 3 active requests (`pending`, `accepted`, `claimed`) at once.
+- Drop requests expire when shift start is within 24 hours or explicit `expiresAtUtc` is reached.
+- API runs an idempotent expiry worker every 3 minutes to enforce drop expiration.
 
 ## Test Login Credentials
 
@@ -117,8 +136,16 @@ All seeded users use password: `Pass123!`
 - `DELETE /shifts/:id/assignments/:assignmentId`
 - `GET /staff?locationId=<id>`
 - `GET /on-duty?locationId=<id>`
-- `POST /swap-requests` (stub + realtime event plumbing)
-- `POST /swap-requests/:id/resolve` (stub + realtime event plumbing)
+- `GET /swap-requests?mine=true`
+- `GET /swap-requests?available=true`
+- `GET /swap-requests?managerInbox=true`
+- `GET /swap-requests/eligible-staff?shiftId=<id>`
+- `POST /swap-requests`
+- `POST /swap-requests/:id/accept`
+- `POST /swap-requests/:id/claim`
+- `POST /swap-requests/:id/cancel`
+- `POST /swap-requests/:id/approve`
+- `POST /swap-requests/:id/reject`
 - `GET /analytics/schedule-health` (placeholder, returns 501)
 
 ## Realtime Features
@@ -138,9 +165,9 @@ Implemented events:
 - `assignment_removed`
 - `notification_created`
 - `on_duty_updated`
-- `swap_requested` (stub plumbing)
-- `swap_updated` (stub plumbing)
-- `swap_cancelled` (stub plumbing)
+- `swap_requested`
+- `swap_updated`
+- `swap_cancelled`
 - `conflict_detected`
 
 Behavior highlights:
@@ -150,6 +177,7 @@ Behavior highlights:
 - Notifications are persisted and pushed live via `notification_created`.
 - On-duty view updates live per location via `on_duty_updated`.
 - Concurrent assignment conflicts emit `conflict_detected` to manager user room.
+- Swap/drop lifecycle transitions emit realtime updates through `swap_requested`, `swap_updated`, and `swap_cancelled`.
 
 ## Frontend Architecture Rules
 
@@ -204,8 +232,17 @@ Conflict handling:
    - switch preference between `in_app_only` and `in_app_plus_email_sim`
    - trigger assignment and confirm new notification appears via realtime
 10. Open `/on-duty` (manager/admin), choose a location, then call `POST /shifts/:id/clock-in` and `POST /shifts/:id/clock-out` for assigned staff; confirm the list updates live without refresh.
-11. Call `POST /shifts/:id/unpublish` or `PATCH /shifts/:id` for a near-term shift and confirm 48h cutoff blocks it.
-12. Concurrency test (two manager windows):
+11. Regret Swap scenario:
+   - Log in as `ethan.staff@coastaleats.com`, open `Regret Swap Demo`, and verify swap lifecycle in staff requests.
+   - Log in as manager, open swap inbox, and approve/reject with reason.
+12. Sunday Night Chaos scenario:
+   - Log in as `ava.staff@coastaleats.com`, create/drop coverage for `Sunday Night Chaos`.
+   - Log in as another eligible staff user and claim the request.
+   - Finalize as manager from the swap inbox.
+13. Shift edit cancellation edge case:
+   - Create a pending swap/drop request.
+   - Edit that shift as manager and confirm request auto-cancels with realtime + notification.
+14. Concurrency test (two manager windows):
    - Open two browser windows and log in as managers who can access the same location.
    - Pick two different shifts and the same staff member.
    - Click **Confirm Assign** in both windows at nearly the same time.
@@ -237,5 +274,5 @@ npm run test:constraints -w apps/api
 
 - Assignment constraints now enforce overlap, minimum rest, required skill, certification, and availability windows.
 - Overtime cap and labor law policy checks remain TODO for a later iteration.
-- Pending swap request cancellation hooks are structured in place for edit/publish flows; richer notifications are TODO.
+- Swap/drop lifecycle now supports creation, accept/claim, manager approval/rejection, cancellation, expiry, and realtime notifications.
 - No shared `packages/` types package added yet to keep MVP simple and avoid premature abstraction.

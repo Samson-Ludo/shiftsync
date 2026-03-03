@@ -96,6 +96,68 @@ export type AssignmentSuggestion = {
   reason: string;
 };
 
+export type SwapRequestType = 'swap' | 'drop';
+export type SwapRequestStatus =
+  | 'pending'
+  | 'accepted'
+  | 'claimed'
+  | 'approved'
+  | 'rejected'
+  | 'cancelled'
+  | 'expired';
+
+export type SwapRequestItem = {
+  _id: string;
+  type: SwapRequestType;
+  status: SwapRequestStatus;
+  note?: string;
+  expiresAtUtc: string;
+  createdAt: string;
+  updatedAt: string;
+  shift: {
+    _id: string;
+    locationId: string;
+    timezone: string;
+    title: string;
+    localDate: string;
+    startLocalTime: string;
+    endLocalTime: string;
+    startAtUtc: string;
+    endAtUtc: string;
+    published: boolean;
+  };
+  fromStaff: {
+    id: string;
+    name: string;
+    email: string | null;
+  };
+  toStaff: {
+    id: string;
+    name: string;
+    email: string | null;
+  } | null;
+};
+
+export type SwapRequestResponse = {
+  swapRequest: SwapRequestItem;
+};
+
+export type ListSwapRequestsResponse = {
+  swapRequests: SwapRequestItem[];
+};
+
+export type EligibleSwapStaffResponse = {
+  suggestions: AssignmentSuggestion[];
+  violations: AssignmentViolation[];
+};
+
+export type CreateSwapRequestPayload = {
+  type: SwapRequestType;
+  shiftId: string;
+  toStaffId?: string;
+  note?: string;
+};
+
 export type AssignmentValidationResponse = {
   ok: boolean;
   violations: AssignmentViolation[];

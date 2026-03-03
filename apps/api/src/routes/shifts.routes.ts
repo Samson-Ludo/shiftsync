@@ -27,7 +27,10 @@ import {
   simulateEmailForNotifications,
 } from '../services/notification.service.js';
 import { getOnDutyStateForLocation } from '../services/on-duty.service.js';
-import { cancelPendingSwapRequestsForShift } from '../services/swap.service.js';
+import {
+  cancelNonFinalSwapRequestsForShift,
+  dispatchCancelledSwapRequests,
+} from '../services/swap.service.js';
 import { computeWeekStart, hoursUntilUtc, resolveShiftUtcWindow, utcToLocationString } from '../utils/time.js';
 
 const getShiftsSchema = z.object({
@@ -517,30 +520,61 @@ shiftsRouter.patch(
 
     const weekStartLocal = computeWeekStart(nextLocalDate, shift.timezone);
 
-    const cancelledSwapRequests = await cancelPendingSwapRequestsForShift(
-      shift._id.toString(),
-      'Cancelled because shift details changed',
-    );
+    const swapCancelReason = 'Cancelled because shift details changed';
+    type UpdatedShiftSnapshot = {
+      _id: Types.ObjectId;
+      locationId: Types.ObjectId;
+      title: string;
+      localDate: string;
+      startLocalTime: string;
+      endLocalTime: string;
+      startAtUtc: string;
+      weekStartLocal: string;
+    };
+    let session: mongoose.ClientSession | null = null;
+    let cancelledSwapRequests: Awaited<ReturnType<typeof cancelNonFinalSwapRequestsForShift>> = [];
+    let updated: UpdatedShiftSnapshot | null = null;
 
-    // TODO: After swap workflows are implemented, emit explicit notifications to impacted users.
-    const updated = await ShiftModel.findByIdAndUpdate(
-      shiftObjectId,
-      {
-        $set: {
-          title: req.body.title ?? shift.title,
-          requiredSkill: req.body.requiredSkill ?? shift.requiredSkill,
-          localDate: nextLocalDate,
-          startLocalTime: nextStart,
-          endLocalTime: nextEnd,
-          startAtUtc: utcWindow.startAtUtc,
-          endAtUtc: utcWindow.endAtUtc,
-          overnight: utcWindow.overnight,
-          weekStartLocal,
-          updatedBy: new Types.ObjectId(user.userId),
-        },
-      },
-      { new: true },
-    ).lean();
+    try {
+      session = await mongoose.startSession();
+      session.startTransaction();
+      try {
+        cancelledSwapRequests = await cancelNonFinalSwapRequestsForShift({
+          shiftId: shift._id,
+          reason: swapCancelReason,
+          actorId: user.userId,
+          session,
+        });
+
+        updated = await ShiftModel.findByIdAndUpdate(
+          shiftObjectId,
+          {
+            $set: {
+              title: req.body.title ?? shift.title,
+              requiredSkill: req.body.requiredSkill ?? shift.requiredSkill,
+              localDate: nextLocalDate,
+              startLocalTime: nextStart,
+              endLocalTime: nextEnd,
+              startAtUtc: utcWindow.startAtUtc,
+              endAtUtc: utcWindow.endAtUtc,
+              overnight: utcWindow.overnight,
+              weekStartLocal,
+              updatedBy: new Types.ObjectId(user.userId),
+            },
+          },
+          { new: true, session },
+        ).lean<UpdatedShiftSnapshot | null>();
+
+        await session.commitTransaction();
+      } catch (txError) {
+        await session.abortTransaction();
+        throw txError;
+      }
+    } finally {
+      if (session) {
+        await session.endSession();
+      }
+    }
 
     if (updated) {
       const io = req.app.get('io');
@@ -553,6 +587,22 @@ shiftsRouter.patch(
           occurredAtUtc: new Date().toISOString(),
         });
       }
+
+      await dispatchCancelledSwapRequests({
+        cancelled: cancelledSwapRequests,
+        shift: {
+          _id: updated._id,
+          locationId: updated.locationId,
+          title: updated.title,
+          localDate: updated.localDate,
+          startLocalTime: updated.startLocalTime,
+          endLocalTime: updated.endLocalTime,
+          startAtUtc: updated.startAtUtc,
+        },
+        actorId: user.userId,
+        reason: swapCancelReason,
+        io,
+      });
 
       await emitScheduleEvent(req, 'schedule_updated', {
         locationId: updated.locationId.toString(),

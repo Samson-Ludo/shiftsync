@@ -4,10 +4,13 @@ import {
   AssignStaffResponse,
   AssignmentValidationResponse,
   AuthLoginResponse,
+  CreateSwapRequestPayload,
   CreateShiftRequest,
   CurrentUser,
   ClockActionResponse,
+  EligibleSwapStaffResponse,
   ListNotificationsResponse,
+  ListSwapRequestsResponse,
   MarkNotificationsReadResponse,
   NotificationPreference,
   ListShiftsResponse,
@@ -18,6 +21,7 @@ import {
   OnDutyResponse,
   PublishShiftResponse,
   ShiftMutationResponse,
+  SwapRequestResponse,
   UpdateNotificationPreferenceResponse,
   UpdateShiftRequest,
 } from './types';
@@ -118,6 +122,70 @@ export const listStaff = async (locationId: string): Promise<ListStaffResponse> 
   const { data } = await api.get<ListStaffResponse>('/staff', {
     params: { locationId },
   });
+  return data;
+};
+
+export const listSwapRequests = async (params?: {
+  mine?: boolean;
+  available?: boolean;
+  managerInbox?: boolean;
+}): Promise<ListSwapRequestsResponse> => {
+  const { data } = await api.get<ListSwapRequestsResponse>('/swap-requests', {
+    params: {
+      ...(params?.mine !== undefined ? { mine: params.mine } : {}),
+      ...(params?.available !== undefined ? { available: params.available } : {}),
+      ...(params?.managerInbox !== undefined ? { managerInbox: params.managerInbox } : {}),
+    },
+  });
+  return data;
+};
+
+export const listEligibleSwapStaff = async (
+  shiftId: string,
+): Promise<EligibleSwapStaffResponse> => {
+  const { data } = await api.get<EligibleSwapStaffResponse>('/swap-requests/eligible-staff', {
+    params: { shiftId },
+  });
+  return data;
+};
+
+export const createSwapRequest = async (
+  payload: CreateSwapRequestPayload,
+): Promise<SwapRequestResponse> => {
+  const { data } = await api.post<SwapRequestResponse>('/swap-requests', payload);
+  return data;
+};
+
+export const acceptSwapRequest = async (id: string): Promise<SwapRequestResponse> => {
+  const { data } = await api.post<SwapRequestResponse>(`/swap-requests/${id}/accept`);
+  return data;
+};
+
+export const claimDropRequest = async (id: string): Promise<SwapRequestResponse> => {
+  const { data } = await api.post<SwapRequestResponse>(`/swap-requests/${id}/claim`);
+  return data;
+};
+
+export const cancelSwapRequest = async (
+  id: string,
+  reason?: string,
+): Promise<SwapRequestResponse> => {
+  const { data } = await api.post<SwapRequestResponse>(`/swap-requests/${id}/cancel`, {
+    ...(reason ? { reason } : {}),
+  });
+  return data;
+};
+
+export const approveSwapRequest = async (id: string): Promise<SwapRequestResponse> => {
+  const { data } = await api.post<SwapRequestResponse>(`/swap-requests/${id}/approve`);
+  return data;
+};
+
+export const rejectSwapRequest = async (
+  id: string,
+  reason: string,
+): Promise<SwapRequestResponse> => {
+  const { data } = await api.post<SwapRequestResponse>(`/swap-requests/${id}/reject`, { reason });
   return data;
 };
 

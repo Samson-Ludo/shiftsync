@@ -332,6 +332,10 @@ const seed = async () => {
 
   const laDates = makeWeekDates(weekStartLA, 'America/Los_Angeles');
   const nyDates = makeWeekDates(weekStartNY, 'America/New_York');
+  const nowNy = DateTime.now().setZone('America/New_York');
+  const thisWeekSundayNy = nowNy.startOf('week').plus({ days: 6 });
+  const sundayNightChaosDate =
+    thisWeekSundayNy > nowNy ? thisWeekSundayNy.toISODate() ?? nyDates[0] : nyDates[0];
 
   await AvailabilityExceptionModel.insertMany([
     {
@@ -504,6 +508,26 @@ const seed = async () => {
     published: true,
   });
 
+  addShift({
+    locationCode: 'NYC_MID',
+    title: 'Regret Swap Demo',
+    requiredSkill: 'line_cook',
+    localDate: sundayNightChaosDate,
+    startLocalTime: '13:00',
+    endLocalTime: '17:00',
+    published: true,
+  });
+
+  addShift({
+    locationCode: 'NYC_MID',
+    title: 'Sunday Night Chaos',
+    requiredSkill: 'line_cook',
+    localDate: sundayNightChaosDate,
+    startLocalTime: '18:00',
+    endLocalTime: '22:00',
+    published: true,
+  });
+
   const highRiskShiftSpecs = [
     { day: 0, start: '06:00', end: '10:00' },
     { day: 0, start: '11:00', end: '15:00' },
@@ -563,17 +587,56 @@ const seed = async () => {
       assignedBy: managers[0]._id,
       status: 'assigned' as const,
     },
+    {
+      shiftId: shifts.find((shift) => shift.title === 'Regret Swap Demo')!._id,
+      staffId: staffUsers[3]._id,
+      assignedBy: managers[1]._id,
+      status: 'assigned' as const,
+    },
+    {
+      shiftId: shifts.find((shift) => shift.title === 'Sunday Night Chaos')!._id,
+      staffId: staffUsers[0]._id,
+      assignedBy: managers[1]._id,
+      status: 'assigned' as const,
+    },
   ];
 
   await ShiftAssignmentModel.insertMany(assignments);
 
   await SwapRequestModel.create({
+    type: 'swap',
     shiftId: assignments[0].shiftId,
     fromStaffId: staffUsers[0]._id,
     toStaffId: staffUsers[3]._id,
     status: 'pending',
+    expiresAtUtc: DateTime.fromISO(highHoursShifts[0].startAtUtc, { zone: 'utc' }).toJSDate(),
     note: 'Need coverage for appointment',
   });
+
+  const regretShift = shifts.find((shift) => shift.title === 'Regret Swap Demo')!;
+  const chaosShift = shifts.find((shift) => shift.title === 'Sunday Night Chaos')!;
+
+  await SwapRequestModel.insertMany([
+    {
+      type: 'swap',
+      shiftId: regretShift._id,
+      fromStaffId: staffUsers[3]._id,
+      toStaffId: staffUsers[11]._id,
+      status: 'accepted',
+      expiresAtUtc: DateTime.fromISO(regretShift.startAtUtc, { zone: 'utc' }).toJSDate(),
+      note: 'Regret Swap demo: accepted and waiting manager approval.',
+    },
+    {
+      type: 'drop',
+      shiftId: chaosShift._id,
+      fromStaffId: staffUsers[0]._id,
+      status: 'pending',
+      expiresAtUtc: DateTime.fromISO(chaosShift.startAtUtc, { zone: 'utc' })
+        .minus({ hours: 24 })
+        .toJSDate(),
+      note: 'Sunday Night Chaos demo: open drop request waiting for claim.',
+    },
+  ]);
 
   await NotificationModel.insertMany([
     {
@@ -645,6 +708,8 @@ const seed = async () => {
   console.log('- 12x4h assignments + 1 extra 4h shift create a 52h risk scenario');
   console.log('- overlapping conflict candidate shifts exist in LA for double-booking checks');
   console.log('- explicit validation demo shifts seeded for unavailable, skill, certification, overlap, and rest constraints');
+  console.log('- Regret Swap demo seeded as accepted swap awaiting manager approval');
+  console.log('- Sunday Night Chaos demo seeded with a near-term drop request for live coverage pickup');
 
   await disconnectFromDatabase();
 };
