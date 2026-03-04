@@ -10,6 +10,16 @@ Latest passing PRD scenario videos are in `apps/web/e2e-videos/latest`:
 - `05-regret-swap.webm`
 - `06-sunday-night-chaos.webm`
 
+GitHub-friendly GIF previews are also provided:
+
+- `01-overtime-trap.gif`
+- `02-timezone-tangle.gif`
+- `03-simultaneous-assignment-victor.gif`
+- `03-simultaneous-assignment-riley.gif`
+- `04-fairness-complaint.gif`
+- `05-regret-swap.gif`
+- `06-sunday-night-chaos.gif`
+
 Notes:
 
 - Scenario 3 uses two browser contexts (Victor and Riley), so it has two recordings.

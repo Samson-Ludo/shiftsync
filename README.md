@@ -330,123 +330,103 @@ Pre-flight:
 - Scenario week is seeded as **next ISO week** from seed runtime.
 - Example: if seeded on **March 4, 2026**, use **week start March 9, 2026** and **Sunday March 15, 2026**.
 
-> Embedded playback note: most markdown renderers support these inline videos, but autoplay behavior depends on the viewer. Each row also includes direct links as fallback.
+> GitHub-friendly demo format: GIFs auto-play inline for quick review. Full `.webm` clips are linked below each preview.
 
-<table>
-  <thead>
-    <tr>
-      <th width="62%">Timeline + Steps</th>
-      <th width="38%">Demo Video</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td>
-        <strong><code>00:00-01:00</code> Setup</strong><br />
-        - Log in as <code>victor.manager@coastaleats.com</code>.<br />
-        - Open <code>/manager</code> and set <strong>Week Start</strong> to seeded Monday.<br />
-        - Companion clip uses the opening of Scenario 1.
-      </td>
-      <td>
-        <video src="apps/web/e2e-videos/latest/01-overtime-trap.webm" controls muted playsinline preload="metadata" width="360"></video><br />
-        <a href="apps/web/e2e-videos/latest/01-overtime-trap.webm">Open clip</a>
-      </td>
-    </tr>
-    <tr>
-      <td>
-        <strong><code>01:00-04:00</code> Scenario 1 - Sunday Night Chaos</strong><br />
-        - Log out and log in as <code>benjamin.staff@coastaleats.com</code>.<br />
-        - Open <code>/staff#available-drops</code>, claim <code>Sunday Night Chaos</code>.<br />
-        - Log out and log in as <code>victor.manager@coastaleats.com</code>.<br />
-        - Open <code>/manager#swap-inbox</code>, approve claimed drop request.<br />
-        - Callout: original assignment remains until approval; realtime swap events and notifications fire at each step.
-      </td>
-      <td>
-        <video src="apps/web/e2e-videos/latest/06-sunday-night-chaos.webm" controls muted playsinline preload="metadata" width="360"></video><br />
-        <a href="apps/web/e2e-videos/latest/06-sunday-night-chaos.webm">Open clip</a>
-      </td>
-    </tr>
-    <tr>
-      <td>
-        <strong><code>04:00-07:00</code> Scenario 2 - Overtime Trap</strong><br />
-        - In <code>/manager</code>, select <code>High-Hours Prep Block 13</code>.<br />
-        - Choose <code>Ethan Lopez</code> and show what-if impact (<code>projectedWeeklyHours</code> reaches 52).<br />
-        - If 7th-day block appears, enter override reason and confirm assignment with override.<br />
-        - Open <code>/overtime</code> (Midtown, same week) and show overtime premium + overtime-driving assignment line item.
-      </td>
-      <td>
-        <video src="apps/web/e2e-videos/latest/01-overtime-trap.webm" controls muted playsinline preload="metadata" width="360"></video><br />
-        <a href="apps/web/e2e-videos/latest/01-overtime-trap.webm">Open clip</a>
-      </td>
-    </tr>
-    <tr>
-      <td>
-        <strong><code>07:00-09:00</code> Scenario 3 - Timezone Tangle</strong><br />
-        - Log out and log in as <code>maya.manager@coastaleats.com</code>.<br />
-        - In <code>/manager</code> at LA_DT, select <code>Timezone Tangle West</code>.<br />
-        - Attempt to assign <code>Benjamin Price</code>.<br />
-        - Callout: blocked by timezone-aware overlap with seeded <code>Timezone Tangle East</code> assignment.
-      </td>
-      <td>
-        <video src="apps/web/e2e-videos/latest/02-timezone-tangle.webm" controls muted playsinline preload="metadata" width="360"></video><br />
-        <a href="apps/web/e2e-videos/latest/02-timezone-tangle.webm">Open clip</a>
-      </td>
-    </tr>
-    <tr>
-      <td>
-        <strong><code>09:00-12:00</code> Scenario 4 - Simultaneous Assignment</strong><br />
-        - Open two windows.<br />
-        - Window A: <code>victor.manager@coastaleats.com</code> on <code>Simultaneous Assignment Midtown</code>.<br />
-        - Window B: <code>riley.manager@coastaleats.com</code> on <code>Simultaneous Assignment Brooklyn</code>.<br />
-        - In both windows choose <code>Ava Ramirez</code> and click <strong>Confirm Assign</strong> nearly simultaneously.<br />
-        - Expected: one succeeds, one fails with conflict feedback.
-      </td>
-      <td>
-        <video src="apps/web/e2e-videos/latest/03-simultaneous-assignment-victor.webm" controls muted playsinline preload="metadata" width="360"></video><br />
-        <a href="apps/web/e2e-videos/latest/03-simultaneous-assignment-victor.webm">Open Victor clip</a><br /><br />
-        <video src="apps/web/e2e-videos/latest/03-simultaneous-assignment-riley.webm" controls muted playsinline preload="metadata" width="360"></video><br />
-        <a href="apps/web/e2e-videos/latest/03-simultaneous-assignment-riley.webm">Open Riley clip</a>
-      </td>
-    </tr>
-    <tr>
-      <td>
-        <strong><code>12:00-14:00</code> Scenario 5 - Fairness Complaint</strong><br />
-        - Log in as <code>riley.manager@coastaleats.com</code>, open <code>/fairness</code>.<br />
-        - Select Brooklyn and seeded Monday-Sunday date range.<br />
-        - Show premium shift distribution + fairness score to verify/refute Saturday-night complaint.
-      </td>
-      <td>
-        <video src="apps/web/e2e-videos/latest/04-fairness-complaint.webm" controls muted playsinline preload="metadata" width="360"></video><br />
-        <a href="apps/web/e2e-videos/latest/04-fairness-complaint.webm">Open clip</a>
-      </td>
-    </tr>
-    <tr>
-      <td>
-        <strong><code>14:00-16:00</code> Scenario 6 - Regret Swap</strong><br />
-        - Log in as <code>ava.staff@coastaleats.com</code>, open <code>/staff#swap-requests</code>.<br />
-        - Cancel accepted <code>Regret Swap Demo</code> before manager action.<br />
-        - Log in as <code>victor.manager@coastaleats.com</code>, confirm it is no longer actionable.<br />
-        - Callout: assignment stays with original owner after cancellation.
-      </td>
-      <td>
-        <video src="apps/web/e2e-videos/latest/05-regret-swap.webm" controls muted playsinline preload="metadata" width="360"></video><br />
-        <a href="apps/web/e2e-videos/latest/05-regret-swap.webm">Open clip</a>
-      </td>
-    </tr>
-    <tr>
-      <td>
-        <strong><code>16:00-18:00</code> Wrap-up</strong><br />
-        - Optional: <code>/on-duty</code> live roster and <code>/audit</code> shift history/export.<br />
-        - Recap: constraints, swaps/drops, overtime what-if, fairness analytics, realtime updates, audit trail.<br />
-        - Companion clip uses the closing of Scenario 6.
-      </td>
-      <td>
-        <video src="apps/web/e2e-videos/latest/06-sunday-night-chaos.webm" controls muted playsinline preload="metadata" width="360"></video><br />
-        <a href="apps/web/e2e-videos/latest/06-sunday-night-chaos.webm">Open clip</a>
-      </td>
-    </tr>
-  </tbody>
-</table>
+### `00:00-01:00` Setup
+
+![Setup companion GIF](apps/web/e2e-videos/latest/01-overtime-trap.gif)
+
+Full clip: [01-overtime-trap.webm](apps/web/e2e-videos/latest/01-overtime-trap.webm)
+
+- Log in as `victor.manager@coastaleats.com`.
+- Open `/manager` and set **Week Start** to seeded Monday.
+- Companion clip uses the opening of Scenario 1.
+
+### `01:00-04:00` Scenario 1 - Sunday Night Chaos
+
+![Sunday Night Chaos GIF](apps/web/e2e-videos/latest/06-sunday-night-chaos.gif)
+
+Full clip: [06-sunday-night-chaos.webm](apps/web/e2e-videos/latest/06-sunday-night-chaos.webm)
+
+- Log out and log in as `benjamin.staff@coastaleats.com`.
+- Open `/staff#available-drops`, claim `Sunday Night Chaos`.
+- Log out and log in as `victor.manager@coastaleats.com`.
+- Open `/manager#swap-inbox`, approve claimed drop request.
+- Callout: original assignment remains until approval; realtime swap events and notifications fire at each step.
+
+### `04:00-07:00` Scenario 2 - Overtime Trap
+
+![Overtime Trap GIF](apps/web/e2e-videos/latest/01-overtime-trap.gif)
+
+Full clip: [01-overtime-trap.webm](apps/web/e2e-videos/latest/01-overtime-trap.webm)
+
+- In `/manager`, select `High-Hours Prep Block 13`.
+- Choose `Ethan Lopez` and show what-if impact (`projectedWeeklyHours` reaches 52).
+- If 7th-day block appears, enter override reason and confirm assignment with override.
+- Open `/overtime` (Midtown, same week) and show overtime premium + overtime-driving assignment line item.
+
+### `07:00-09:00` Scenario 3 - Timezone Tangle
+
+![Timezone Tangle GIF](apps/web/e2e-videos/latest/02-timezone-tangle.gif)
+
+Full clip: [02-timezone-tangle.webm](apps/web/e2e-videos/latest/02-timezone-tangle.webm)
+
+- Log out and log in as `maya.manager@coastaleats.com`.
+- In `/manager` at LA_DT, select `Timezone Tangle West`.
+- Attempt to assign `Benjamin Price`.
+- Callout: blocked by timezone-aware overlap with seeded `Timezone Tangle East` assignment.
+
+### `09:00-12:00` Scenario 4 - Simultaneous Assignment
+
+Victor window preview:
+
+![Simultaneous Assignment Victor GIF](apps/web/e2e-videos/latest/03-simultaneous-assignment-victor.gif)
+
+Riley window preview:
+
+![Simultaneous Assignment Riley GIF](apps/web/e2e-videos/latest/03-simultaneous-assignment-riley.gif)
+
+Full clips:
+
+- [03-simultaneous-assignment-victor.webm](apps/web/e2e-videos/latest/03-simultaneous-assignment-victor.webm)
+- [03-simultaneous-assignment-riley.webm](apps/web/e2e-videos/latest/03-simultaneous-assignment-riley.webm)
+
+- Open two windows.
+- Window A: `victor.manager@coastaleats.com` on `Simultaneous Assignment Midtown`.
+- Window B: `riley.manager@coastaleats.com` on `Simultaneous Assignment Brooklyn`.
+- In both windows choose `Ava Ramirez` and click **Confirm Assign** nearly simultaneously.
+- Expected: one succeeds, one fails with conflict feedback.
+
+### `12:00-14:00` Scenario 5 - Fairness Complaint
+
+![Fairness Complaint GIF](apps/web/e2e-videos/latest/04-fairness-complaint.gif)
+
+Full clip: [04-fairness-complaint.webm](apps/web/e2e-videos/latest/04-fairness-complaint.webm)
+
+- Log in as `riley.manager@coastaleats.com`, open `/fairness`.
+- Select Brooklyn and seeded Monday-Sunday date range.
+- Show premium shift distribution + fairness score to verify/refute Saturday-night complaint.
+
+### `14:00-16:00` Scenario 6 - Regret Swap
+
+![Regret Swap GIF](apps/web/e2e-videos/latest/05-regret-swap.gif)
+
+Full clip: [05-regret-swap.webm](apps/web/e2e-videos/latest/05-regret-swap.webm)
+
+- Log in as `ava.staff@coastaleats.com`, open `/staff#swap-requests`.
+- Cancel accepted `Regret Swap Demo` before manager action.
+- Log in as `victor.manager@coastaleats.com`, confirm it is no longer actionable.
+- Callout: assignment stays with original owner after cancellation.
+
+### `16:00-18:00` Wrap-up
+
+![Wrap-up companion GIF](apps/web/e2e-videos/latest/06-sunday-night-chaos.gif)
+
+Full clip: [06-sunday-night-chaos.webm](apps/web/e2e-videos/latest/06-sunday-night-chaos.webm)
+
+- Optional: `/on-duty` live roster and `/audit` shift history/export.
+- Recap: constraints, swaps/drops, overtime what-if, fairness analytics, realtime updates, audit trail.
+- Companion clip uses the closing of Scenario 6.
 
 ## MVP API Surface
 
