@@ -129,7 +129,7 @@ const staffSeedData: StaffSeed[] = [
     desiredWeeklyHours: 36,
     maxHoursPerWeek: 40,
     hourlyRate: 19.9,
-    certifications: ['LA_PIER', 'LA_DT'],
+    certifications: ['LA_PIER', 'LA_DT', 'NYC_BRK'],
     skills: ['closing', 'dish'],
   },
   {
@@ -140,7 +140,7 @@ const staffSeedData: StaffSeed[] = [
     maxHoursPerWeek: 28,
     hourlyRate: 21.1,
     certifications: ['NYC_BRK', 'NYC_MID'],
-    skills: ['server', 'barista'],
+    skills: ['server', 'barista', 'closing'],
   },
   {
     firstName: 'James',
@@ -150,7 +150,7 @@ const staffSeedData: StaffSeed[] = [
     maxHoursPerWeek: 40,
     hourlyRate: 22.95,
     certifications: ['LA_PIER'],
-    skills: ['prep', 'opening'],
+    skills: ['prep', 'opening', 'line_cook'],
   },
   {
     firstName: 'Charlotte',
@@ -170,7 +170,7 @@ const staffSeedData: StaffSeed[] = [
     maxHoursPerWeek: 37,
     hourlyRate: 24.5,
     certifications: ['LA_DT', 'NYC_MID'],
-    skills: ['line_cook', 'expo'],
+    skills: ['line_cook', 'expo', 'prep'],
   },
 ];
 
@@ -351,6 +351,25 @@ const seed = async () => {
     }),
   );
 
+  await AvailabilityRuleModel.insertMany([
+    {
+      staffId: staffUsers[11]._id,
+      locationId: locationByCode.get('NYC_MID')!._id,
+      dayOfWeek: 1,
+      startLocalTime: '09:00',
+      endLocalTime: '17:00',
+      timezone: 'America/New_York',
+    },
+    ...Array.from({ length: 7 }).map((_, index) => ({
+      staffId: staffUsers[3]._id,
+      locationId: locationByCode.get('NYC_MID')!._id,
+      dayOfWeek: index + 1,
+      startLocalTime: '06:00',
+      endLocalTime: '16:00',
+      timezone: 'America/New_York',
+    })),
+  ]);
+
   const weekStartLA =
     DateTime.now().setZone('America/Los_Angeles').plus({ weeks: 1 }).startOf('week').toISODate() ??
     DateTime.now().setZone('America/Los_Angeles').toISODate()!;
@@ -360,10 +379,10 @@ const seed = async () => {
 
   const laDates = makeWeekDates(weekStartLA, 'America/Los_Angeles');
   const nyDates = makeWeekDates(weekStartNY, 'America/New_York');
-  const nowNy = DateTime.now().setZone('America/New_York');
-  const thisWeekSundayNy = nowNy.startOf('week').plus({ days: 6 });
-  const sundayNightChaosDate =
-    thisWeekSundayNy > nowNy ? thisWeekSundayNy.toISODate() ?? nyDates[0] : nyDates[0];
+  const scenarioWeekStartNy =
+    DateTime.now().setZone('America/New_York').plus({ weeks: 1 }).startOf('week');
+  const sundayNightChaosDate = scenarioWeekStartNy.plus({ days: 6 }).toISODate() ?? nyDates[6];
+  const regretSwapDate = scenarioWeekStartNy.plus({ days: 1 }).toISODate() ?? nyDates[1];
 
   await AvailabilityExceptionModel.insertMany([
     {
@@ -397,6 +416,69 @@ const seed = async () => {
       timezone: 'America/Los_Angeles',
       type: 'block',
       reason: 'Training day',
+    },
+    {
+      staffId: staffUsers[11]._id,
+      dateLocal: sundayNightChaosDate,
+      timezone: 'America/New_York',
+      type: 'allow',
+      startLocalTime: '18:00',
+      endLocalTime: '23:30',
+      reason: 'On-call Sunday coverage window for chaos demo',
+    },
+    {
+      staffId: staffUsers[0]._id,
+      dateLocal: regretSwapDate,
+      timezone: 'America/New_York',
+      type: 'allow',
+      startLocalTime: '12:00',
+      endLocalTime: '18:00',
+      reason: 'Swap demo shift availability',
+    },
+    {
+      staffId: staffUsers[11]._id,
+      dateLocal: regretSwapDate,
+      timezone: 'America/New_York',
+      type: 'allow',
+      startLocalTime: '12:00',
+      endLocalTime: '18:00',
+      reason: 'Swap target availability for Regret Swap demo',
+    },
+    {
+      staffId: staffUsers[0]._id,
+      dateLocal: nyDates[4],
+      timezone: 'America/New_York',
+      type: 'allow',
+      startLocalTime: '17:00',
+      endLocalTime: '23:00',
+      reason: 'Premium Friday close availability',
+    },
+    {
+      staffId: staffUsers[0]._id,
+      dateLocal: nyDates[5],
+      timezone: 'America/New_York',
+      type: 'allow',
+      startLocalTime: '17:00',
+      endLocalTime: '23:00',
+      reason: 'Premium Saturday close availability',
+    },
+    {
+      staffId: staffUsers[0]._id,
+      dateLocal: sundayNightChaosDate,
+      timezone: 'America/New_York',
+      type: 'allow',
+      startLocalTime: '18:00',
+      endLocalTime: '23:30',
+      reason: 'Sunday coverage assignment availability',
+    },
+    {
+      staffId: staffUsers[0]._id,
+      dateLocal: nyDates[0],
+      timezone: 'America/New_York',
+      type: 'allow',
+      startLocalTime: '11:00',
+      endLocalTime: '17:00',
+      reason: 'Cross-location Monday availability for simultaneous assignment race demo',
     },
   ]);
 
@@ -560,7 +642,7 @@ const seed = async () => {
     locationCode: 'NYC_MID',
     title: 'Regret Swap Demo',
     requiredSkill: 'line_cook',
-    localDate: sundayNightChaosDate,
+    localDate: regretSwapDate,
     startLocalTime: '13:00',
     endLocalTime: '17:00',
     published: true,
@@ -571,8 +653,48 @@ const seed = async () => {
     title: 'Sunday Night Chaos',
     requiredSkill: 'line_cook',
     localDate: sundayNightChaosDate,
-    startLocalTime: '18:00',
-    endLocalTime: '22:00',
+    startLocalTime: '19:00',
+    endLocalTime: '23:00',
+    published: true,
+  });
+
+  addShift({
+    locationCode: 'NYC_MID',
+    title: 'Timezone Tangle East',
+    requiredSkill: 'line_cook',
+    localDate: nyDates[0],
+    startLocalTime: '09:00',
+    endLocalTime: '13:00',
+    published: true,
+  });
+
+  addShift({
+    locationCode: 'LA_DT',
+    title: 'Timezone Tangle West',
+    requiredSkill: 'line_cook',
+    localDate: laDates[0],
+    startLocalTime: '09:00',
+    endLocalTime: '13:00',
+    published: true,
+  });
+
+  addShift({
+    locationCode: 'NYC_MID',
+    title: 'Simultaneous Assignment Midtown',
+    requiredSkill: 'line_cook',
+    localDate: nyDates[0],
+    startLocalTime: '12:00',
+    endLocalTime: '16:00',
+    published: true,
+  });
+
+  addShift({
+    locationCode: 'NYC_BRK',
+    title: 'Simultaneous Assignment Brooklyn',
+    requiredSkill: 'line_cook',
+    localDate: nyDates[0],
+    startLocalTime: '12:30',
+    endLocalTime: '16:30',
     published: true,
   });
 
@@ -613,7 +735,7 @@ const seed = async () => {
   const assignments = [
     ...highHoursShifts.slice(0, 12).map((shift) => ({
       shiftId: shift._id,
-      staffId: staffUsers[0]._id,
+      staffId: staffUsers[3]._id,
       assignedBy: managers[1]._id,
       status: 'assigned' as const,
     })),
@@ -631,13 +753,13 @@ const seed = async () => {
     },
     {
       shiftId: shifts.find((shift) => shift.title === 'Conflict Candidate A')!._id,
-      staffId: staffUsers[7]._id,
+      staffId: staffUsers[9]._id,
       assignedBy: managers[0]._id,
       status: 'assigned' as const,
     },
     {
       shiftId: shifts.find((shift) => shift.title === 'Regret Swap Demo')!._id,
-      staffId: staffUsers[3]._id,
+      staffId: staffUsers[0]._id,
       assignedBy: managers[1]._id,
       status: 'assigned' as const,
     },
@@ -650,12 +772,18 @@ const seed = async () => {
     {
       shiftId: shifts.find((shift) => shift.title === 'Friday Premium Close')!._id,
       staffId: staffUsers[0]._id,
-      assignedBy: managers[1]._id,
+      assignedBy: managers[2]._id,
       status: 'assigned' as const,
     },
     {
       shiftId: shifts.find((shift) => shift.title === 'Saturday Premium Close')!._id,
       staffId: staffUsers[0]._id,
+      assignedBy: managers[2]._id,
+      status: 'assigned' as const,
+    },
+    {
+      shiftId: shifts.find((shift) => shift.title === 'Timezone Tangle East')!._id,
+      staffId: staffUsers[11]._id,
       assignedBy: managers[1]._id,
       status: 'assigned' as const,
     },
@@ -666,8 +794,8 @@ const seed = async () => {
   await SwapRequestModel.create({
     type: 'swap',
     shiftId: assignments[0].shiftId,
-    fromStaffId: staffUsers[0]._id,
-    toStaffId: staffUsers[3]._id,
+    fromStaffId: staffUsers[3]._id,
+    toStaffId: staffUsers[11]._id,
     status: 'pending',
     expiresAtUtc: DateTime.fromISO(highHoursShifts[0].startAtUtc, { zone: 'utc' }).toJSDate(),
     note: 'Need coverage for appointment',
@@ -680,7 +808,7 @@ const seed = async () => {
     {
       type: 'swap',
       shiftId: regretShift._id,
-      fromStaffId: staffUsers[3]._id,
+      fromStaffId: staffUsers[0]._id,
       toStaffId: staffUsers[11]._id,
       status: 'accepted',
       expiresAtUtc: DateTime.fromISO(regretShift.startAtUtc, { zone: 'utc' }).toJSDate(),
@@ -700,7 +828,7 @@ const seed = async () => {
 
   await NotificationModel.insertMany([
     {
-      userId: staffUsers[0]._id,
+      userId: staffUsers[3]._id,
       type: 'warning',
       title: 'Near weekly hour cap',
       body: 'You are currently assigned 48 hours this week. Another 4-hour shift would move you to 52.',
@@ -708,12 +836,14 @@ const seed = async () => {
       metadata: { projectedHoursIfExtraShift: 52 },
     },
     {
-      userId: managers[0]._id,
+      userId: managers[1]._id,
       type: 'conflict',
       title: 'Potential double booking detected',
-      body: 'Conflict Candidate A and B overlap. Assign carefully for staff with dual LA certifications.',
+      body: 'Simultaneous Assignment Midtown and Brooklyn overlap for Ava. Two managers can trigger a live assignment race test.',
       read: false,
-      metadata: { shiftTitles: ['Conflict Candidate A', 'Conflict Candidate B'] },
+      metadata: {
+        shiftTitles: ['Simultaneous Assignment Midtown', 'Simultaneous Assignment Brooklyn'],
+      },
     },
     {
       userId: staffUsers[8]._id,
@@ -764,14 +894,16 @@ const seed = async () => {
   console.log('- 4 locations across America/Los_Angeles and America/New_York');
   console.log('- 3 managers with explicit location assignments');
   console.log('- 12 staff with mixed skills/certifications');
-  console.log('- recurring availability rules + 4 one-off exceptions');
+  console.log('- recurring availability rules + targeted one-off exceptions for scenario determinism');
+  console.log('- timezone tangle demo seeded for dual-certified staff with explicit 9:00-17:00 windows across NY and LA');
   console.log('- overnight shift seeded: Overnight Cleanup 23:00-03:00');
   console.log('- 12x4h assignments + 1 extra 4h shift create a 52h risk scenario');
-  console.log('- overlapping conflict candidate shifts exist in LA for double-booking checks');
+  console.log('- simultaneous assignment race demo seeded with overlapping Midtown/Brooklyn shifts for two managers');
+  console.log('- overlapping conflict candidate shifts exist for standard double-booking checks');
   console.log('- explicit validation demo shifts seeded for unavailable, skill, certification, overlap, and rest constraints');
   console.log('- premium fairness demo seeded with Friday/Saturday evening premium shifts concentrated on one staff');
-  console.log('- Regret Swap demo seeded as accepted swap awaiting manager approval');
-  console.log('- Sunday Night Chaos demo seeded with a near-term drop request for live coverage pickup');
+  console.log('- Regret Swap demo seeded as accepted swap awaiting manager approval with cancel path');
+  console.log('- Sunday Night Chaos demo seeded for upcoming Sunday 19:00 with a pending drop request coverage path');
 
   await disconnectFromDatabase();
 };

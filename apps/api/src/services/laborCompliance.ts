@@ -29,7 +29,7 @@ export type LaborComplianceImpact = {
   warnings: LaborComplianceWarning[];
 };
 
-type ShiftWindow = {
+export type ShiftWindow = {
   shiftId: string;
   startAtUtc: string;
   endAtUtc: string;
@@ -189,13 +189,16 @@ export const computeLaborComplianceForWeek = async (args: {
   weekStartLocal: string;
   timezone: string;
   includeShiftWindowUtc?: { startAtUtc: string; endAtUtc: string };
+  assignedShiftWindows?: ShiftWindow[];
   session?: ClientSession;
 }): Promise<StaffWeekLaborSnapshot> => {
   const { weekStart, weekEnd } = getWeekWindow(args.weekStartLocal, args.timezone);
-  const assignedShiftWindows = await fetchAssignedShiftWindows({
-    staffId: args.staffId,
-    session: args.session,
-  });
+  const assignedShiftWindows =
+    args.assignedShiftWindows ??
+    (await fetchAssignedShiftWindows({
+      staffId: args.staffId,
+      session: args.session,
+    }));
 
   const dailyTotals: Record<string, number> = {};
   const workedDates = new Set<string>();

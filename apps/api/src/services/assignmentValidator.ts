@@ -15,6 +15,7 @@ import {
   DAILY_WARNING_HOURS,
   LaborComplianceImpact,
   LaborComplianceWarning,
+  ShiftWindow,
   SEVENTH_DAY_OVERRIDE_REQUIRED,
   SIXTH_DAY_WARNING,
   WEEKLY_OVERTIME_HOURS,
@@ -284,6 +285,7 @@ const evaluateLaborCompliance = async (args: {
     startAtUtc: string;
     endAtUtc: string;
   };
+  assignedShiftWindows?: ShiftWindow[];
   override?: {
     allowSeventhDay?: boolean;
     reason?: string;
@@ -298,6 +300,7 @@ const evaluateLaborCompliance = async (args: {
       startAtUtc: args.shift.startAtUtc,
       endAtUtc: args.shift.endAtUtc,
     },
+    assignedShiftWindows: args.assignedShiftWindows,
     session: args.session,
   });
 
@@ -614,6 +617,7 @@ const evaluateStaffAgainstShift = async (args: {
     allowSeventhDay?: boolean;
     reason?: string;
   };
+  includeCompliance?: boolean;
   session?: ClientSession;
 }): Promise<{ violations: AssignmentViolation[]; complianceImpact: LaborComplianceImpact }> => {
   const violations: AssignmentViolation[] = [];
@@ -698,25 +702,31 @@ const evaluateStaffAgainstShift = async (args: {
 
   violations.push(...temporalViolations);
 
-  const laborCompliance = await evaluateLaborCompliance({
-    staffId: args.staff._id,
-    shift: {
-      timezone: args.shift.timezone,
-      weekStartLocal: args.shift.weekStartLocal,
-      localDate: args.shift.localDate,
-      startAtUtc: args.shift.startAtUtc,
-      endAtUtc: args.shift.endAtUtc,
-    },
-    override: args.override,
-    session: args.session,
-  });
+  let complianceImpact = defaultComplianceImpact();
+  if (args.includeCompliance ?? true) {
+    const laborCompliance = await evaluateLaborCompliance({
+      staffId: args.staff._id,
+      shift: {
+        timezone: args.shift.timezone,
+        weekStartLocal: args.shift.weekStartLocal,
+        localDate: args.shift.localDate,
+        startAtUtc: args.shift.startAtUtc,
+        endAtUtc: args.shift.endAtUtc,
+      },
+      assignedShiftWindows: temporal.existingShifts.map((existingShift) => ({
+        shiftId: existingShift.shiftId,
+        startAtUtc: existingShift.startAtUtc,
+        endAtUtc: existingShift.endAtUtc,
+      })),
+      override: args.override,
+      session: args.session,
+    });
 
-  violations.push(...laborCompliance.violations);
+    violations.push(...laborCompliance.violations);
+    complianceImpact = laborCompliance.complianceImpact;
+  }
 
-  return {
-    violations,
-    complianceImpact: laborCompliance.complianceImpact,
-  };
+  return { violations, complianceImpact };
 };
 
 const getSuggestions = async (args: {
@@ -735,10 +745,45 @@ const getSuggestions = async (args: {
   locationCode: string;
   session?: ClientSession;
 }): Promise<AssignmentSuggestion[]> => {
+  const certificationQuery = StaffCertificationModel.find({
+    locationId: args.shift.locationId,
+    staffId: { $ne: args.targetStaffId },
+  }).select('staffId');
+  if (args.session) {
+    certificationQuery.session(args.session);
+  }
+
+  const certifications = await certificationQuery.lean();
+  const certifiedStaffIds = certifications.map((entry) => entry.staffId);
+  if (certifiedStaffIds.length === 0) {
+    return [];
+  }
+
+  const normalizedRequiredSkill = args.shift.requiredSkill?.trim() ?? '';
+  let candidateStaffIds = certifiedStaffIds;
+
+  if (normalizedRequiredSkill.length > 0) {
+    const skillQuery = StaffSkillModel.find({
+      skill: normalizedRequiredSkill,
+      staffId: { $in: certifiedStaffIds },
+    }).select('staffId');
+    if (args.session) {
+      skillQuery.session(args.session);
+    }
+
+    const skillRows = await skillQuery.lean();
+    const skillEligibleIds = new Set(skillRows.map((entry) => entry.staffId.toString()));
+    candidateStaffIds = candidateStaffIds.filter((staffId) => skillEligibleIds.has(staffId.toString()));
+  }
+
+  if (candidateStaffIds.length === 0) {
+    return [];
+  }
+
   const staffQuery = UserModel.find({
     role: 'staff',
     active: true,
-    _id: { $ne: args.targetStaffId },
+    _id: { $in: candidateStaffIds },
   })
     .select('firstName lastName')
     .sort({ firstName: 1, lastName: 1 });
@@ -759,6 +804,7 @@ const getSuggestions = async (args: {
       },
       shift: args.shift,
       locationCode: args.locationCode,
+      includeCompliance: false,
       session: args.session,
     });
 
